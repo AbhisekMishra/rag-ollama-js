@@ -12,7 +12,7 @@ pdfjs.GlobalWorkerOptions.workerSrc = new URL(
 ).toString();
 
 export default function Home() {
-    const [messages, setMessages] = useState<{ text: string; sender: string }[]>([{ text: "Hi. How many I help you today ?", sender: "System" }]);
+    const [messages, setMessages] = useState<{ text: string; sender: string }[]>([{ text: "Hi. How may I help you today ?", sender: "System" }]);
     const [input, setInput] = useState<string>("");
     const [loading, setLoading] = useState<boolean>(false);
     const [pageNumber, setPageNumber] = useState<number>(1);

@@ -1,6 +1,6 @@
 import { supabaseClient } from '@/app/lib/supabase';
 import { PDFLoader } from "@langchain/community/document_loaders/fs/pdf";
-import { RecursiveCharacterTextSplitter } from "langchain/text_splitter";
+import { RecursiveCharacterTextSplitter } from "@langchain/textsplitters";
 
 import { vectorStore } from '@/app/lib/supabase';
 

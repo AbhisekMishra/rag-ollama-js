@@ -57,7 +57,7 @@ export default function Home() {
           Login
         </button>
         <p className="mt-4 text-center text-gray-600">
-          Don't have an account? 
+          Don&apos;t have an account?
           <Link 
             type="button" 
             className="text-blue-600 underline hover:text-blue-800 transition duration-200"

@@ -11,13 +11,11 @@ export const supabaseClient = createClient(
     apiKey,
 );
 
-export const vectorStore = (filter?: any) => new SupabaseVectorStore(embeddings, {
+export const vectorStore = (filter?: Record<string, unknown>) => new SupabaseVectorStore(embeddings, {
     client: supabaseClient,
     tableName: "documents",
     queryName: "match_documents",
     filter: filter || {}
 });
 
-supabaseClient.auth.signUp
-
-export const retriever = (filter: any) => vectorStore(filter).asRetriever();
+export const retriever = (filter: Record<string, unknown>) => vectorStore(filter).asRetriever();

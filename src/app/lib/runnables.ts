@@ -12,7 +12,7 @@ const promptChain = RunnableSequence.from([
     new StringOutputParser()
 ])
 
-const retrieverChain = (filter: Record<string, any>) => RunnableSequence.from([
+const retrieverChain = (filter: Record<string, unknown>) => RunnableSequence.from([
     result => result.standaloneQuestion,
     retriever(filter),
     combineDocuments
@@ -24,7 +24,7 @@ const answerChain = RunnableSequence.from([
     new StringOutputParser()
 ])
 
-export const outputChain = (filter: Record<string, any>) => RunnableSequence.from([
+export const outputChain = (filter: Record<string, unknown>) => RunnableSequence.from([
     {
         standaloneQuestion: promptChain,
         originalQuestion: new RunnablePassthrough()
