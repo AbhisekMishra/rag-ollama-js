@@ -17,6 +17,7 @@
     "ai": "^7.0.14",
     "font-awesome": "^4.7.0",
     "jose": "^5.10.0",
+    "langfuse-langchain": "^3.38.20",
     "marked": "^15.0.12",
     "next": "^15.5.20",
     "pdf-parse": "^1.1.4",

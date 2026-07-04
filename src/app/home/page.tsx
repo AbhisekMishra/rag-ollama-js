@@ -19,6 +19,8 @@ export default function Home() {
     const [numPages, setNumPages] = useState<number>();
     const [user, setUser] = useState<string>('');
     const [file, setFile] = useState<File>();
+    // Stable ID that groups all turns in this browser session into one LangFuse trace session
+    const [sessionId] = useState<string>(() => crypto.randomUUID());
 
     const pdfRef = useRef<HTMLDivElement>(null);
     const lastScrollTop = useRef<number>(0);
@@ -51,11 +53,11 @@ export default function Home() {
     useEffect(() => {
         const userId = sessionStorage.getItem('userId') || '';
         setUser(userId);
-        getFile()
     }, [])
 
     useEffect(() => {
-        getFile()
+        if (!user) return;
+        getFile();
     }, [user])
 
     const handleClick = (event: React.MouseEvent<HTMLAnchorElement>) => {
@@ -80,7 +82,8 @@ export default function Home() {
                     method: "POST",
                     body: JSON.stringify({ question: input, history: messages }),
                     headers: {
-                        'User-Id': user
+                        'User-Id': user,
+                        'Session-Id': sessionId,
                     }
                 });
                 if (response.body) {
