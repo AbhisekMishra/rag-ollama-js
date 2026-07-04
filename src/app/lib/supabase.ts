@@ -1,5 +1,5 @@
 import { SupabaseVectorStore } from "@langchain/community/vectorstores/supabase";
-import { createClient,  } from "@supabase/supabase-js";
+import { createClient } from "@supabase/supabase-js";
 
 import { embeddings } from "./ollama";
 import { env } from "../utils/env";

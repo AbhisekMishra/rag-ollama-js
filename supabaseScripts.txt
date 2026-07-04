@@ -1,56 +1,76 @@
--- Enable the pgvector extension to work with embedding vectors
--- create extension vector;
+-- ============================================================
+-- STEP 1: Enable Extensions
+-- Run from Dashboard: Database → Extensions → enable "vector" and "pgcrypto"
+-- Or run here:
+-- ============================================================
+CREATE EXTENSION IF NOT EXISTS vector;
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
--- Create a table to store your documents
-create table documents (
-  id serial primary key, --bigserial
-  content text, -- corresponds to Document.pageContent
-  metadata jsonb, -- corresponds to Document.metadata
-  embedding vector(768) -- 768 works for ollama embeddings, change if needed
+
+-- ============================================================
+-- STEP 2: Create the documents table
+-- NOTE: embedding dimension 768 matches nomic-embed-text.
+-- If you change the embeddings model, update vector(768) here
+-- AND in the match_documents function below.
+-- ============================================================
+CREATE TABLE documents (
+  id bigserial PRIMARY KEY,
+  content text,          -- corresponds to Document.pageContent
+  metadata jsonb,        -- corresponds to Document.metadata
+  embedding vector(768)
 );
 
--- Create a function to search for documents
-create function match_documents (
+
+-- ============================================================
+-- STEP 3: Create the match_documents search function
+-- ============================================================
+CREATE FUNCTION match_documents (
   query_embedding vector(768),
   match_count int DEFAULT null,
   filter jsonb DEFAULT '{}'
-) returns table (
+) RETURNS TABLE (
   id bigint,
   content text,
   metadata jsonb,
   embedding jsonb,
   similarity float
 )
-language plpgsql
-as $$
+LANGUAGE plpgsql
+AS $$
 #variable_conflict use_column
-begin
-  return query
-  select
+BEGIN
+  RETURN QUERY
+  SELECT
     id,
     content,
     metadata,
-    (embedding::text)::jsonb as embedding,
-    1 - (documents.embedding <=> query_embedding) as similarity
-  from documents
-  where metadata @> filter
-  order by documents.embedding <=> query_embedding
-  limit match_count;
-end;
+    (embedding::text)::jsonb AS embedding,
+    1 - (documents.embedding <=> query_embedding) AS similarity
+  FROM documents
+  WHERE metadata @> filter
+  ORDER BY documents.embedding <=> query_embedding
+  LIMIT match_count;
+END;
 $$;
 
-CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
--- Create a table to add users
-create table users (
+-- ============================================================
+-- STEP 4: Create the users table
+-- ============================================================
+CREATE TABLE users (
   id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
-  firstName text, -- corresponds to User.firstName
-  lastName text, -- corresponds to User.lastName
-  username text unique, -- corresponds to User.username
+  firstName text,
+  lastName text,
+  username text UNIQUE,
   password varchar
 );
 
--- Create function hash_password_trigger to hash the password before insert
+
+-- ============================================================
+-- STEP 5: Create the password hashing trigger
+-- Hashes passwords with bcrypt via pgcrypto before insert/update.
+-- Do NOT hash passwords in application code — this trigger handles it.
+-- ============================================================
 CREATE OR REPLACE FUNCTION hash_password_trigger()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -58,13 +78,20 @@ BEGIN
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
+
 CREATE TRIGGER before_insert_or_update
 BEFORE INSERT OR UPDATE ON users
 FOR EACH ROW
 EXECUTE FUNCTION hash_password_trigger();
 
--- Create function for authentication
-CREATE OR REPLACE FUNCTION verify_password (input_username TEXT, input_password TEXT) RETURNS RECORD AS $$
+
+-- ============================================================
+-- STEP 6: Create the verify_password RPC
+-- ============================================================
+CREATE OR REPLACE FUNCTION verify_password (
+  input_username TEXT,
+  input_password TEXT
+) RETURNS RECORD AS $$
 DECLARE
     user_record RECORD;
 BEGIN
@@ -82,11 +109,21 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- Function to delete documents by userid
+
+-- ============================================================
+-- STEP 7: Create the delete_documents_by_user RPC
+-- ============================================================
 CREATE OR REPLACE FUNCTION delete_documents_by_user(userid TEXT)
 RETURNS VOID AS $$
 BEGIN
     DELETE FROM documents
-    WHERE metadata @> FORMAT('{"userId": "%s"}', userId)::JSONB;
+    WHERE metadata @> FORMAT('{"userId": "%s"}', userid)::JSONB;
 END;
 $$ LANGUAGE plpgsql;
+
+
+-- ============================================================
+-- STEP 8: Create the Storage bucket
+-- Do this from the Supabase Dashboard:
+--   Storage → New bucket → name: "document_store" → Private
+-- ============================================================

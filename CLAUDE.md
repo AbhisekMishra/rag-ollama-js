@@ -21,7 +21,7 @@ The app requires two external services running before `npm run dev` will work en
 
 Env vars (see `env.example`): `SUPABASE_API_KEY`, `SUPABASE_URL`, `OLLAMA_LLM_BASE_URL`, `OLLAMA_LLM_MODEL`, `OLLAMA_EMBEDDINGS_BASE_URL`, `OLLAMA_EMBEDDINGS_MODEL`. Read centrally through `src/app/utils/env.ts` — always add new env vars there rather than calling `process.env` directly elsewhere.
 
-**Optional:** `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `LANGFUSE_BASEURL` — when present, every `/api/chat` request is traced via LangFuse (latency, token counts, prompt/completion per chain node). The app runs normally without them.
+**Optional:** `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `LANGFUSE_BASEURL` — when present, every `/api/chat` request is traced via LangFuse (latency, token counts, prompt/completion per chain node). The app runs normally without them. Tracing uses the OpenTelemetry-based `@langfuse/langchain` + `@langfuse/otel` SDK (v5), not the legacy `langfuse-langchain` package — that legacy package only supports LangChain 0.3.x and is incompatible with this project's `@langchain/core` v1.x stack.
 
 ## Architecture
 
@@ -51,7 +51,8 @@ Login/signup (`/api/login`, `/api/signup`) hit Supabase RPCs (`verify_password`,
 ### Key files
 
 - `src/app/lib/ollama.ts` — constructs the shared `ChatOllama` (`llm`) and `OllamaEmbeddings` (`embeddings`) singletons used everywhere.
-- `src/app/api/chat/route.ts` — builds a `CallbackHandler` (langfuse-langchain) per request and passes it to `outputChain.stream()` as `{ callbacks }`. When `LANGFUSE_PUBLIC_KEY` is absent the callbacks array is empty and tracing is skipped.
+- `src/app/api/chat/route.ts` — builds a `CallbackHandler` (`@langfuse/langchain`) per request and passes it to `outputChain.stream()` as `{ callbacks }`. When `LANGFUSE_PUBLIC_KEY` is absent the callbacks array is empty and tracing is skipped.
+- `src/instrumentation.ts` — Next.js instrumentation hook; creates a `NodeTracerProvider` with `LangfuseSpanProcessor` and wires it via `setLangfuseTracerProvider` (`@langfuse/tracing`). Uses an isolated provider rather than `NodeSDK`/`provider.register()` because Next.js claims the global OTel provider first.
 - `src/app/lib/supabase.ts` — `supabaseClient` (auth/storage/RPC) and `vectorStore(filter)` / `retriever(filter)` factories for the `documents` table.
 - `src/app/lib/runnables.ts` — the LangChain chain composition described above.
 - `src/app/lib/prompts.ts` — all prompt templates.

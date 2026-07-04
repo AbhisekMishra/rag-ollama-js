@@ -1,4 +1,4 @@
-import { CallbackHandler } from "langfuse-langchain";
+import { CallbackHandler } from "@langfuse/langchain";
 import { outputChain } from "@/app/lib/runnables";
 import { env } from "@/app/utils/env";
 
@@ -7,15 +7,11 @@ export async function POST(req: Request) {
     const sessionId = req.headers.get('Session-Id');
     const { question, history } = await req.json();
 
-    // Build callbacks array — empty when LangFuse keys are not configured
     const callbacks = env.langfuse.publicKey ? [
         new CallbackHandler({
-            publicKey: env.langfuse.publicKey,
-            secretKey: env.langfuse.secretKey,
-            baseUrl: env.langfuse.baseUrl,
             userId: userId ?? undefined,
             sessionId: sessionId ?? undefined,
-            metadata: { historyLength: history?.length ?? 0 },
+            traceMetadata: { historyLength: history?.length ?? 0 },
             tags: ["rag-chat"],
         })
     ] : [];
