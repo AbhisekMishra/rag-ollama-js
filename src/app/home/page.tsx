@@ -1,54 +1,42 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { parse } from 'marked';
-import { pdfjs, Document, Page } from 'react-pdf';
-import 'react-pdf/dist/Page/TextLayer.css';
-import 'react-pdf/dist/Page/AnnotationLayer.css';
+import { RAG_MODES, DEFAULT_RAG_MODE, type RagMode } from "@/app/lib/rag-strategies/modes";
+import { Spinner } from "@/app/components/Spinner";
+import type { RetrievedSource } from "@/app/utils/helpers";
 
-pdfjs.GlobalWorkerOptions.workerSrc = new URL(
-    'pdfjs-dist/build/pdf.worker.min.mjs',
-    import.meta.url,
-).toString();
+interface ChatMessage {
+    text: string;
+    sender: "User" | "System";
+    sources?: RetrievedSource[];
+}
+
+// Turns the LLM's inline "[Source 2]" citation markers into markdown links so `marked`
+// renders them as clickable anchors. Matches "[Source 2]" and also "[Source 2 | Page 5]"
+// since models sometimes echo the full context label instead of the short form the prompt asks for.
+function linkifyCitations(text: string): string {
+    return text.replace(/\[Source (\d+)(?:\s*\|[^\]]*)?\]/g, (_match, id) => `[Source ${id}](#cite-${id})`);
+}
+
+function uniquePages(sources: RetrievedSource[]): number[] {
+    return Array.from(new Set(sources.map((source) => source.pageNumber))).sort((a, b) => a - b);
+}
 
 export default function Home() {
-    const [messages, setMessages] = useState<{ text: string; sender: string }[]>([{ text: "Hi. How may I help you today ?", sender: "System" }]);
+    const [messages, setMessages] = useState<ChatMessage[]>([{ text: "Hi. How may I help you today ?", sender: "System" }]);
     const [input, setInput] = useState<string>("");
     const [loading, setLoading] = useState<boolean>(false);
-    const [pageNumber, setPageNumber] = useState<number>(1);
-    const [numPages, setNumPages] = useState<number>();
     const [user, setUser] = useState<string>('');
-    const [file, setFile] = useState<File>();
+    const [ragMode, setRagMode] = useState<RagMode>(DEFAULT_RAG_MODE);
     // Stable ID that groups all turns in this browser session into one LangFuse trace session
     const [sessionId] = useState<string>(() => crypto.randomUUID());
 
-    const pdfRef = useRef<HTMLDivElement>(null);
-    const lastScrollTop = useRef<number>(0);
-
-    useEffect(() => {
-        const handleScroll = () => {
-            if (pdfRef.current) {
-                const { scrollTop, clientHeight, scrollHeight } = pdfRef.current;
-                const isAtBottom = scrollTop + clientHeight >= scrollHeight;
-                const isAtTop = scrollTop === 0;
-
-                if (isAtBottom && pageNumber < (numPages || 0) && lastScrollTop.current !== scrollTop) {
-                    lastScrollTop.current = scrollTop;
-                    handleNextPage();
-                } else if (isAtTop && pageNumber > 1 && lastScrollTop.current !== scrollTop) {
-                    lastScrollTop.current = scrollTop;
-                    handlePrevPage();
-                }
-            }
-        };
-
-        const currentPdfRef = pdfRef.current;
-        currentPdfRef?.addEventListener("scroll", handleScroll);
-
-        return () => {
-            currentPdfRef?.removeEventListener("scroll", handleScroll);
-        };
-    }, [pdfRef, pageNumber, numPages]);
+    const [activePanel, setActivePanel] = useState<"chat" | "document">("chat");
+    const [fileUrl, setFileUrl] = useState<string | null>(null);
+    const [fileChecked, setFileChecked] = useState<boolean>(false);
+    const [uploading, setUploading] = useState<boolean>(false);
+    const [pageNumber, setPageNumber] = useState<number>(1);
 
     useEffect(() => {
         const userId = sessionStorage.getItem('userId') || '';
@@ -60,97 +48,121 @@ export default function Home() {
         getFile();
     }, [user])
 
-    const handleClick = (event: React.MouseEvent<HTMLAnchorElement>) => {
-        const target = event.target as HTMLAnchorElement; // Type assertion
-        const hrefAttribute = target?.attributes?.getNamedItem('href'); // Get the href attribute
-        if (hrefAttribute?.value) {
-            event.preventDefault();
-            const pageNum = hrefAttribute?.value.split(".")[0]?.replace('#', '');
-            setPageNumber(Number(pageNum))
+    // The embedded PDF is always backed by an object URL — revoke the previous one whenever
+    // it's replaced (new upload) or the page unmounts, so blobs don't pile up in memory.
+    useEffect(() => {
+        if (!fileUrl) return;
+        return () => URL.revokeObjectURL(fileUrl);
+    }, [fileUrl])
+
+    const getFile = async () => {
+        const res = await fetch('/api/document', { headers: { 'User-Id': user } });
+        if (!res.ok) {
+            res.body?.cancel();
+            setFileUrl(null);
+            setFileChecked(true);
+            return;
         }
+        const blob = await res.blob();
+        setFileUrl(URL.createObjectURL(blob));
+        setFileChecked(true);
+    }
+
+    const jumpToPage = (page: number) => {
+        setPageNumber(page);
+        setActivePanel('document');
+    }
+
+    const handleAnswerClick = (event: React.MouseEvent<HTMLSpanElement>, messageIndex: number) => {
+        const anchor = (event.target as HTMLElement).closest('a');
+        const href = anchor?.getAttribute('href');
+        if (!href?.startsWith('#cite-')) return;
+        event.preventDefault();
+        const sourceId = Number(href.replace('#cite-', ''));
+        const source = messages[messageIndex]?.sources?.find((candidate) => candidate.id === sourceId);
+        if (source) jumpToPage(source.pageNumber);
     }
 
     const handleSendMessage = async (event: React.FormEvent) => {
         event.preventDefault(); // Prevents page refresh
-        if (input.trim()) {
-            setMessages([...messages, { text: input, sender: "User" }]);
-            setInput(""); // Clear the input box
-            setLoading(true); // Set loading to true
+        if (!input.trim()) return;
 
-            try {
-                const response = await fetch('/api/chat', {
-                    method: "POST",
-                    body: JSON.stringify({ question: input, history: messages }),
-                    headers: {
-                        'User-Id': user,
-                        'Session-Id': sessionId,
-                    }
-                });
-                if (response.body) {
-                    const reader = response.body.getReader();
-                    const decoder = new TextDecoder("utf-8");
-                    let systemMessage = ""; // Initialize a variable to accumulate the message
+        const nextMessages = [...messages, { text: input, sender: "User" as const }];
+        const systemIndex = nextMessages.length;
+        setMessages([...nextMessages, { text: "", sender: "System", sources: [] }]);
+        setInput("");
+        setLoading(true);
 
-                    // Add an initial system message entry
-                    setMessages((prevMessages) => [...prevMessages, { text: "", sender: "System" }]);
-
-                    while (true) {
-                        const { done, value } = await reader.read();
-                        if (done) break;
-                        const chunk = decoder.decode(value);
-                        systemMessage += chunk; // Accumulate the message
-                        // Update the last message in the messages array
-                        setMessages((prevMessages) => {
-                            const updatedMessages = [...prevMessages];
-                            updatedMessages[updatedMessages.length - 1] = { text: systemMessage, sender: "System" };
-                            return updatedMessages;
-                        });
-                    }
-                } else {
-                    console.error("Response body is null");
+        try {
+            const response = await fetch('/api/chat', {
+                method: "POST",
+                body: JSON.stringify({ question: input, history: messages, ragMode }),
+                headers: {
+                    'User-Id': user,
+                    'Session-Id': sessionId,
                 }
-            } catch (error) {
-                console.error("Error fetching response:", error);
-            } finally {
-                setLoading(false); // Set loading to false
+            });
+            if (!response.body) {
+                console.error("Response body is null");
+                return;
             }
-        }
-    };
 
-    function onDocumentLoadSuccess({ numPages }: { numPages: number }): void {
-        setNumPages(numPages);
-    }
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder("utf-8");
+            let buffer = "";
+            let answerText = "";
 
-    const handleNextPage = () => {
-        if (pageNumber < (numPages || 0)) {
-            setPageNumber(pageNumber + 1);
-        }
-    };
+            const updateSystemMessage = (patch: Partial<ChatMessage>) => {
+                setMessages((prev) => {
+                    const updated = [...prev];
+                    updated[systemIndex] = { ...updated[systemIndex], ...patch };
+                    return updated;
+                });
+            };
 
-    const handlePrevPage = () => {
-        if (pageNumber > 1) {
-            setPageNumber(pageNumber - 1);
-        }
-    };
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                buffer += decoder.decode(value, { stream: true });
 
-    const getFile = async () => {
-        const fileRes = await fetch('/api/document', {
-            headers: {
-                'User-Id': user
+                const rawEvents = buffer.split("\n\n");
+                buffer = rawEvents.pop() ?? "";
+
+                for (const rawEvent of rawEvents) {
+                    if (!rawEvent.trim()) continue;
+                    let eventName = "message";
+                    let data = "";
+                    for (const line of rawEvent.split("\n")) {
+                        if (line.startsWith("event:")) eventName = line.slice(6).trim();
+                        else if (line.startsWith("data:")) data = line.slice(5).trim();
+                    }
+                    if (!data) continue;
+
+                    const payload = JSON.parse(data);
+                    if (eventName === "sources") {
+                        updateSystemMessage({ sources: payload });
+                    } else if (eventName === "token") {
+                        answerText += payload.text;
+                        updateSystemMessage({ text: answerText });
+                    } else if (eventName === "error") {
+                        answerText += `\n\n_${payload.message}_`;
+                        updateSystemMessage({ text: answerText });
+                    }
+                }
             }
-        });
-        if (!fileRes.ok) return;
-        console.log(fileRes)
-        const blob = await fileRes.blob(); // Convert Response to Blob
-        const file = new File([blob], 'document.pdf'); // Create a File object
-        setFile(file); // Set the File object
-    }
+        } catch (error) {
+            console.error("Error fetching response:", error);
+        } finally {
+            setLoading(false); // Set loading to false
+        }
+    };
 
     const handleUpload = async (file: File | null) => {
-        if (file) {
+        if (!file) return;
+        setUploading(true);
+        try {
             const formData = new FormData();
             formData.append("file", file);
-
             await fetch("/api/document", {
                 method: "POST",
                 body: formData,
@@ -158,121 +170,189 @@ export default function Home() {
                     'User-Id': user
                 }
             });
-            getFile()
+            setPageNumber(1);
+            await getFile();
+        } finally {
+            setUploading(false);
         }
     }
 
     return (
-        <div className="flex overflow-hidden gap-4 p-4 bg-gray-50" style={{ height: "93vh" }}>
+        <div className="flex h-full min-h-0 flex-col gap-3 bg-paper p-3 sm:p-4 md:flex-row md:gap-4">
+            <input
+                type="file"
+                id="fileUpload"
+                className="hidden"
+                onChange={(e) => handleUpload(e.target.files ? e.target.files[0] : null)}
+                accept="application/pdf"
+            />
+
+            {/* Mobile-only panel switcher */}
+            <div className="flex shrink-0 gap-2 md:hidden">
+                <button
+                    type="button"
+                    onClick={() => setActivePanel('chat')}
+                    className={`flex-1 rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${activePanel === 'chat' ? 'border-accent bg-accent-soft text-accent' : 'border-border bg-surface text-ink-soft'}`}
+                >
+                    Chat
+                </button>
+                <button
+                    type="button"
+                    onClick={() => setActivePanel('document')}
+                    className={`flex-1 rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${activePanel === 'document' ? 'border-accent bg-accent-soft text-accent' : 'border-border bg-surface text-ink-soft'}`}
+                >
+                    Document
+                </button>
+            </div>
+
             {/* Chat Section */}
-            <div className="w-1/2 flex flex-col bg-white shadow-xl rounded-xl overflow-hidden border border-gray-100">
-                <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-gradient-to-b from-gray-50 to-white">
+            <div className={`${activePanel === 'chat' ? 'flex' : 'hidden'} min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border bg-surface shadow-card md:flex md:w-1/2`}>
+                <div className="flex shrink-0 items-center justify-between gap-3 border-b border-border px-4 py-3">
+                    <div>
+                        <h2 className="text-sm font-semibold text-ink">Chat</h2>
+                        <p className="text-xs text-ink-soft">Ask a question about your document</p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <label htmlFor="ragMode" className="hidden text-[11px] font-semibold uppercase tracking-wide text-ink-faint sm:inline">Mode</label>
+                        <select
+                            id="ragMode"
+                            className="rounded-lg border border-border bg-paper px-2.5 py-1.5 font-mono text-xs text-ink outline-none transition-shadow focus:border-accent focus:ring-2 focus:ring-accent/25"
+                            value={ragMode}
+                            onChange={(e) => setRagMode(e.target.value as RagMode)}
+                            disabled={loading}
+                        >
+                            {RAG_MODES.map((mode) => (
+                                <option key={mode.value} value={mode.value}>{mode.label}</option>
+                            ))}
+                        </select>
+                    </div>
+                </div>
+
+                <div className="flex-1 space-y-3 overflow-y-auto p-4">
                     {messages.map((message, index) => (
-                        <div 
-                            key={index} 
-                            className={`p-4 rounded-xl shadow-sm max-w-[85%] ${
-                                message.sender === "User" 
-                                    ? "bg-gradient-to-r from-blue-500 to-blue-600 text-white ml-auto" 
-                                    : "bg-white text-gray-800 border border-gray-100"
+                        <div
+                            key={index}
+                            className={`max-w-[90%] animate-message-in rounded-2xl px-4 py-2.5 text-[15px] leading-relaxed shadow-sm sm:max-w-[85%] ${
+                                message.sender === "User"
+                                    ? "ml-auto rounded-br-sm bg-accent text-surface"
+                                    : "rounded-bl-sm border border-border bg-surface-muted text-ink"
                             }`}
                         >
                             <span
-                                onClick={handleClick}
+                                onClick={(e) => handleAnswerClick(e, index)}
                                 className="parsed-text whitespace-pre-wrap"
-                                dangerouslySetInnerHTML={{ __html: parse(message.text) }}
+                                dangerouslySetInnerHTML={{ __html: parse(linkifyCitations(message.text)) }}
                             />
+                            {message.sender === "System" && !!message.sources?.length && (
+                                <div className="mt-1.5 flex flex-wrap gap-1.5">
+                                    {uniquePages(message.sources).map((page) => (
+                                        <button
+                                            key={page}
+                                            type="button"
+                                            onClick={() => jumpToPage(page)}
+                                            className="rounded-full border border-border bg-surface px-2 py-0.5 text-[11px] font-medium text-ink-soft transition-colors hover:border-accent hover:text-accent"
+                                        >
+                                            Page {page}
+                                        </button>
+                                    ))}
+                                </div>
+                            )}
                         </div>
                     ))}
                     {loading && (
-                        <div className="flex justify-center">
-                            <div className="animate-pulse text-blue-600 font-medium">Loading...</div>
+                        <div className="flex max-w-[85%] items-center gap-1.5 rounded-2xl rounded-bl-sm border border-border bg-surface-muted px-4 py-3.5">
+                            <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-ink-faint [animation-delay:-0.3s]" />
+                            <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-ink-faint [animation-delay:-0.15s]" />
+                            <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-ink-faint" />
                         </div>
                     )}
                 </div>
-                <div className="border-t border-gray-100 p-4 bg-white">
+
+                <div className="shrink-0 border-t border-border p-3 sm:p-4">
                     <form onSubmit={handleSendMessage} className="flex gap-2">
                         <input
                             type="text"
-                            className="flex-1 p-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/50 text-gray-700 bg-gray-50"
+                            className="min-w-0 flex-1 rounded-xl border border-border bg-paper px-4 py-3 text-ink outline-none transition-shadow focus:border-accent focus:ring-2 focus:ring-accent/25 disabled:opacity-60"
                             value={input}
                             onChange={(e) => setInput(e.target.value)}
-                            placeholder="Type your message..."
+                            placeholder="Type your message…"
                             disabled={loading}
                         />
                         <button
-                            className="px-6 py-3 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-xl hover:from-blue-600 hover:to-blue-700 transition-all shadow-sm disabled:from-gray-300 disabled:to-gray-300 disabled:cursor-not-allowed"
+                            className="flex shrink-0 items-center gap-2 rounded-xl bg-accent px-4 py-3 font-medium text-surface transition-colors hover:bg-accent-strong disabled:cursor-not-allowed disabled:opacity-50 sm:px-5"
                             type="submit"
-                            disabled={loading}
+                            disabled={loading || !input.trim()}
                         >
-                            {loading ? "Sending..." : "Send"}
+                            {loading ? (
+                                <Spinner className="h-4 w-4" />
+                            ) : (
+                                <svg viewBox="0 0 24 24" fill="none" className="h-4 w-4" aria-hidden="true">
+                                    <path d="M4.5 12 19.5 4.5 15 19.5l-3.5-6L4.5 12Z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
+                                    <path d="M11.5 13.5 19.5 4.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+                                </svg>
+                            )}
+                            <span className="hidden sm:inline">Send</span>
                         </button>
                     </form>
                 </div>
             </div>
 
-            {/* PDF Section */}
-            <div className="w-1/2 flex flex-col bg-white shadow-xl rounded-xl overflow-hidden border border-gray-100">
-                {file ? (
-                    <>
-                        <div ref={pdfRef} className="flex-1 overflow-auto p-4 bg-gradient-to-b from-gray-50 to-white">
-                            <div className="flex flex-col items-center">
-                                <Document file={file} onLoadSuccess={onDocumentLoadSuccess}>
-                                    <Page pageNumber={pageNumber} />
-                                </Document>
-                                <p className="mt-4 text-gray-600 font-medium">
-                                    Page {pageNumber} of {numPages}
-                                </p>
-                            </div>
-                        </div>
-                        <div className="border-t border-gray-100 p-4 flex justify-center gap-4 bg-white">
-                            <button
-                                onClick={handlePrevPage}
-                                disabled={pageNumber === 1}
-                                className={`px-6 py-2 rounded-xl transition-all shadow-sm ${
-                                    pageNumber === 1 
-                                        ? 'bg-gray-100 text-gray-400 cursor-not-allowed' 
-                                        : 'bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white'
-                                }`}
-                            >
-                                ← Previous
-                            </button>
-                            <button
-                                onClick={handleNextPage}
-                                disabled={pageNumber === numPages}
-                                className={`px-6 py-2 rounded-xl transition-all shadow-sm ${
-                                    pageNumber === numPages 
-                                        ? 'bg-gray-100 text-gray-400 cursor-not-allowed' 
-                                        : 'bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white'
-                                }`}
-                            >
-                                Next →
-                            </button>
-                        </div>
-                    </>
+            {/* Document Section — the PDF stays embedded and open the whole time; citations
+                jump it to the right page via the iframe's #page= fragment, and the browser's
+                native PDF viewer handles manual scroll/zoom/search/print from there. */}
+            <div className={`${activePanel === 'document' ? 'flex' : 'hidden'} min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border bg-surface shadow-card md:flex md:w-1/2`}>
+                <div className="flex shrink-0 items-center justify-between gap-3 border-b border-border px-4 py-3">
+                    <div>
+                        <h2 className="text-sm font-semibold text-ink">Document</h2>
+                        <p className="text-xs text-ink-soft">{fileUrl ? `Page ${pageNumber}` : "Nothing uploaded yet"}</p>
+                    </div>
+                    {fileUrl && (
+                        <button
+                            onClick={() => document.getElementById('fileUpload')?.click()}
+                            disabled={uploading}
+                            className="shrink-0 rounded-lg border border-border px-2.5 py-1.5 text-xs font-medium text-ink-soft transition-colors hover:bg-surface-muted disabled:opacity-50"
+                        >
+                            {uploading ? "Uploading…" : "Replace"}
+                        </button>
+                    )}
+                </div>
+
+                {!fileChecked ? (
+                    <div className="flex flex-1 items-center justify-center">
+                        <Spinner className="h-6 w-6 text-ink-faint" />
+                    </div>
+                ) : fileUrl ? (
+                    <iframe
+                        key={pageNumber}
+                        src={`${fileUrl}#page=${pageNumber}`}
+                        title="Uploaded document"
+                        className="min-h-0 w-full flex-1 border-0"
+                    />
                 ) : (
-                    <div className="flex items-center justify-center h-full bg-gradient-to-b from-gray-50 to-white">
-                        <div className="text-center">
-                            <input
-                                type="file"
-                                id="fileUpload"
-                                className="hidden"
-                                onChange={(e) => handleUpload(e.target.files ? e.target.files[0] : null)}
-                                accept="application/pdf"
-                            />
-                            <button
-                                className="px-8 py-6 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-xl hover:from-blue-600 hover:to-blue-700 transition-all shadow-lg group"
-                                onClick={() => document.getElementById('fileUpload')?.click()}
-                            >
-                                <div className="text-xl font-semibold">Upload PDF</div>
-                                <div className="text-sm mt-2 text-blue-100 group-hover:text-white transition-colors">
-                                    Click to browse files
-                                </div>
-                            </button>
-                        </div>
+                    <div className="flex flex-1 items-center justify-center p-8">
+                        <button
+                            onClick={() => document.getElementById('fileUpload')?.click()}
+                            disabled={uploading}
+                            className="group flex w-full max-w-xs flex-col items-center gap-3 rounded-xl border-2 border-dashed border-border px-8 py-12 text-center transition-colors hover:border-accent hover:bg-accent-soft disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                            {uploading ? (
+                                <Spinner className="h-7 w-7 text-accent" />
+                            ) : (
+                                <span className="flex h-12 w-12 items-center justify-center rounded-full bg-surface-muted text-ink-soft transition-colors group-hover:bg-accent-soft group-hover:text-accent">
+                                    <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5" aria-hidden="true">
+                                        <path d="M12 16V4m0 0-4 4m4-4 4 4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+                                        <path d="M5 16v2.5A1.5 1.5 0 0 0 6.5 20h11a1.5 1.5 0 0 0 1.5-1.5V16" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+                                    </svg>
+                                </span>
+                            )}
+                            <span>
+                                <span className="block text-sm font-semibold text-ink">{uploading ? "Uploading…" : "Upload a PDF"}</span>
+                                <span className="mt-1 block text-xs text-ink-soft">Click to browse — one document per account</span>
+                            </span>
+                        </button>
                     </div>
                 )}
             </div>
         </div>
     );
 }
-

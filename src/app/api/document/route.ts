@@ -38,7 +38,7 @@ export async function POST(req: Request) {
     const fileExtension = file?.name.split('.').pop();
     if (!fileExtension) return new Response('File extension could not be determined', { status: 400 });
 
-    const { data, error } = await supabaseClient
+    const { error } = await supabaseClient
         .storage
         .from('document_store')
         .upload(`${userId}.${fileExtension}`, file, { upsert: true });

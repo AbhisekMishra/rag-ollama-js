@@ -11,7 +11,8 @@ export async function POST(req: Request): Promise<Response> {
     const { firstname, lastname, username, password }: SignupRequest = await req.json();
     const { error } = await supabaseClient.from('users').insert({ firstname, lastname, username, password });
     if (error) {
-        throw new Error('Error in insert !', error);
+        console.log(error)
+        return new Response('Error in signup !', { status: 400 });
     }
-    return new Response();
+    return new Response(JSON.stringify({ username }), { status: 200 });
 }

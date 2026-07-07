@@ -2,24 +2,21 @@
 @tailwind components;
 @tailwind utilities;
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
 body {
-  color: var(--foreground);
-  background: var(--background);
-  font-family: Arial, Helvetica, sans-serif;
+  color: #1a1e1c;
+  background: #f2f3ef;
+  font-family: var(--font-geist-sans), system-ui, sans-serif;
 }
 
 .parsed-text a {
+  color: #2f6f5e;
   text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* Respect reduced-motion: new chat messages simply appear, no slide/fade. */
+@media (prefers-reduced-motion: reduce) {
+  .animate-message-in {
+    animation: none;
+  }
 }

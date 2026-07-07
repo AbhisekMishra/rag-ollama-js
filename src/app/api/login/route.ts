@@ -10,7 +10,7 @@ export async function POST(req: Request): Promise<Response> {
     const { error } = await supabaseClient.rpc('verify_password', { input_username: username, input_password: password });
     if (error) {
         console.log(error)
-        throw new Response('Error in login !', { status: 400 });
+        return new Response('Error in login !', { status: 400 });
     }
 
     return new Response(JSON.stringify({ username }), { status: 200 });

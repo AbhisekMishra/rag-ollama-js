@@ -24,9 +24,9 @@
     "marked": "^15.0.12",
     "next": "^15.5.20",
     "pdf-parse": "^1.1.4",
+    "raglens": "file:../raglens",
     "react": "^19.2.7",
-    "react-dom": "^19.2.7",
-    "react-pdf": "^9.2.1"
+    "react-dom": "^19.2.7"
   },
   "overrides": {
     "postcss": "^8.5.16"
