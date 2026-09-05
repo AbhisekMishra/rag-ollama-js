@@ -54,6 +54,7 @@ function shapeStageData(name: string, output: unknown): unknown {
         case "generatePhrasings":
         case "hydeDraft":
         case "critiqueGroundedness":
+        case "routeQuery":
             return output;
         case "judgeSufficiency":
         case "cragGrade":
@@ -117,6 +118,7 @@ const LLM_STAGE_RUNNAMES: Record<string, string> = {
     standaloneQuestionLLM: "standaloneQuestion",
     generatePhrasingsLLM: "generatePhrasings",
     hydeDraftLLM: "hydeDraft",
+    routeQueryLLM: "routeQuery",
 };
 
 const encoder = new TextEncoder();

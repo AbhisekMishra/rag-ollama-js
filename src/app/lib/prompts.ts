@@ -67,6 +67,24 @@ export const groundednessTemplate = PromptTemplate.fromTemplate(
     groundedness score:`
 );
 
+export const routeQueryTemplate = PromptTemplate.fromTemplate(
+    `Classify how to best answer the question below, given the conversation history. Reply with exactly one word:
+    DIRECT - the question is small talk, opinion, or general knowledge that doesn't need looking anything up in a document (e.g. "hello", "what's 2+2", "what do you think of that")
+    SINGLE - a straightforward factual question answerable from one focused search of the document
+    MULTI - a broad, ambiguous, or multi-part question that would benefit from searching several phrasings of it
+    Reply with ONLY one of: DIRECT, SINGLE, MULTI
+    conversation history: {history}
+    question: {question}
+    classification:`
+);
+
+export const directAnswerTemplate = PromptTemplate.fromTemplate(
+    `Answer the question below using your own general knowledge — no document context is being used for this answer. If you're not confident in the answer, say so rather than guessing. Always mention that this answer isn't grounded in the uploaded document.
+    conversation history: {history}
+    question: {question}
+    answer:`
+);
+
 export const answerTemplate = PromptTemplate.fromTemplate(`You are a helpful and enthusiastic support bot who answers questions based on the provided context.
 The context is a list of numbered excerpts, each labeled "[Source N | Page P]" followed by its text.
 Your goal is to find the most relevant information from the context to answer the question.

@@ -197,4 +197,36 @@ export const RAG_PIPELINE_STAGES: Record<RagMode, PipelineStageMeta[]> = {
         },
         answerLLM,
     ],
+    agentic: [
+        {
+            id: "routeQuery",
+            label: "Route Query",
+            what: "Classifies the question as DIRECT (answer from general knowledge, no retrieval), SINGLE (one focused retrieval), or MULTI (fan out over several phrasings) — only one of the stages below actually runs, based on this classification.",
+            why: "Not every question needs the document searched, and not every one needs the same retrieval effort — deciding this per-query avoids paying for retrieval (or a wider multi-query fan-out) when a simpler answer would do.",
+            kind: "transform",
+        },
+        vectorRetrieve,
+        {
+            id: "generatePhrasings",
+            label: "Generate Phrasings (if MULTI)",
+            what: "Only runs if routed to MULTI: asks the LLM for 4 alternative phrasings of the question.",
+            why: "Same rationale as the multi-query mode this branch delegates to — hedges against vocabulary mismatch for broad/ambiguous questions.",
+            kind: "transform",
+        },
+        {
+            id: "vectorRetrieveMany",
+            label: "Retrieve Per Phrasing (if MULTI)",
+            what: "Only runs if routed to MULTI: retrieves for the original question and all 4 phrasings in parallel.",
+            why: "Same rationale as multi-query — casts a wider net for a broad question.",
+            kind: "retrieve",
+        },
+        {
+            id: "dedupeCandidates",
+            label: "Dedupe Chunks (if MULTI)",
+            what: "Only runs if routed to MULTI: unions and dedupes the phrasings' retrieved chunks.",
+            why: "Same rationale as multi-query — avoids citing the same chunk twice under different source numbers.",
+            kind: "score",
+        },
+        answerLLM,
+    ],
 };
