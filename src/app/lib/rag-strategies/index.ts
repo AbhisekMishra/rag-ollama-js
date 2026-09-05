@@ -11,6 +11,7 @@ import { sentenceWindowChain } from "./sentence-window";
 import { parentDocumentChain } from "./parent-document";
 import { autoMergingChain } from "./auto-merging";
 import { selfRagChain } from "./self-rag";
+import { cragChain } from "./crag";
 import type { RagStrategy } from "./types";
 import { DEFAULT_RAG_MODE, type RagMode } from "./modes";
 
@@ -29,6 +30,7 @@ export const RAG_STRATEGIES: Record<RagMode, RagStrategy> = {
     "parent-document": parentDocumentChain,
     "auto-merging": autoMergingChain,
     "self-rag": selfRagChain,
+    crag: cragChain,
 };
 
 export function buildRagChain(mode: RagMode, filter: Record<string, unknown>): RunnableSequence {

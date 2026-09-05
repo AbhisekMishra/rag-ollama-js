@@ -52,6 +52,13 @@ export const selfRagRewriteTemplate = PromptTemplate.fromTemplate(
     rewritten question:`
 );
 
+export const cragRewriteTemplate = PromptTemplate.fromTemplate(
+    `The following passages were retrieved for the question below, but none were relevant enough. Rewrite the question using different terms so a search is more likely to find relevant passages. Reply with ONLY the rewritten question, nothing else.
+    question: {question}
+    low-relevance passages: {passages}
+    rewritten question:`
+);
+
 export const groundednessTemplate = PromptTemplate.fromTemplate(
     `On a scale from 0.0 to 1.0, how well is the following answer supported by the given context? A grounded answer only states things the context actually backs up. Judge support only, not writing quality.
     Reply with ONLY a number between 0 and 1, nothing else.

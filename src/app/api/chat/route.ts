@@ -56,9 +56,11 @@ function shapeStageData(name: string, output: unknown): unknown {
         case "critiqueGroundedness":
             return output;
         case "judgeSufficiency":
-            // The named step's output is {docs, attempts} (see selfRagRetrieve in retrieval.ts) —
-            // show the per-hop query/score table, not the raw retrieved docs (those are only
-            // meaningful per-hop, and the final hop's docs already surface via `sources`).
+        case "cragGrade":
+            // Both named steps' output is {docs|kept, attempts} (see selfRagRetrieve/cragRetrieve
+            // in retrieval.ts) — show the per-attempt query/score table, not the raw retrieved
+            // docs (those are only meaningful per-attempt, and the final attempt's docs already
+            // surface via `sources`).
             return (output as { attempts: unknown }).attempts;
         default:
             return undefined;

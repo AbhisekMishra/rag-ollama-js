@@ -187,4 +187,14 @@ export const RAG_PIPELINE_STAGES: Record<RagMode, PipelineStageMeta[]> = {
             kind: "score",
         },
     ],
+    crag: [
+        {
+            id: "cragGrade",
+            label: "Grade + Retry",
+            what: "Over-fetches 20 candidates and scores each one's relevance (0–1), same as re-ranking. If none clear the relevance bar, rewrites the question and retries once before falling back to the best-scoring attempt.",
+            why: "Vector similarity sometimes surfaces nothing actually relevant — rather than answering from a bad context anyway (or just dropping low scorers like plain re-ranking does), a corrective retry gives the query a second chance to find something usable.",
+            kind: "score",
+        },
+        answerLLM,
+    ],
 };

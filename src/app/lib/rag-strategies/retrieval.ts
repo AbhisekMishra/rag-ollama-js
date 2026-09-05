@@ -5,7 +5,7 @@ import type { DocumentInterface } from "@langchain/core/documents";
 import { retriever, hybridSearcher, sentenceRetriever, childRetriever } from "../supabase";
 import { buildContext } from "../../utils/helpers";
 import { llm } from "../ollama";
-import { rerankTemplate, compressionTemplate, contextSufficiencyTemplate, selfRagRewriteTemplate } from "../prompts";
+import { rerankTemplate, compressionTemplate, contextSufficiencyTemplate, selfRagRewriteTemplate, cragRewriteTemplate } from "../prompts";
 
 // Retrieval piped into citation-context building — composed, not hand-orchestrated with
 // async/await — as one named runnable step shared by every strategy, so the chat route can
@@ -350,4 +350,52 @@ async function selfRagRetrieve(filter: Record<string, unknown>, question: string
 export const selfRagRetrieveAndBuildContext = (filter: Record<string, unknown>) => RunnableSequence.from([
     RunnableLambda.from((question: string) => selfRagRetrieve(filter, question)).withConfig({ runName: "judgeSufficiency" }),
     RunnableLambda.from(({ docs, attempts }: { docs: DocumentInterface[]; attempts: SelfRagAttempt[] }) => ({ ...buildContext(docs), attempts })),
+]).withConfig({ runName: "retrieveAndBuildContext" });
+
+const cragRewriteChain = RunnableSequence.from([
+    cragRewriteTemplate,
+    llm,
+    new StringOutputParser(),
+]);
+
+export interface CragAttempt {
+    attempt: number;
+    query: string;
+    table: ScoredCandidate[];
+}
+
+const CRAG_MAX_RETRIES = 1;
+const CRAG_RELEVANCE_THRESHOLD = 0.5;
+
+// CRAG: grade every retrieved candidate's relevance (reusing rerank's scoreCandidates —
+// exact same over-fetch-then-pointwise-score approach, just gating a retry on it rather than
+// only dropping low scorers) and, if NONE of them clear the relevance bar, rewrite the query and
+// retry once before falling back to whichever attempt scored best.
+async function cragRetrieve(filter: Record<string, unknown>, question: string): Promise<{ kept: DocumentInterface[]; attempts: CragAttempt[] }> {
+    let query = question;
+    let attempt = 0;
+    const attempts: CragAttempt[] = [];
+    let best: { table: ScoredCandidate[]; kept: DocumentInterface[] } | undefined;
+    let bestScore = -1;
+    while (true) {
+        const candidates = await retriever(filter, RERANK_FETCH_COUNT).invoke(query);
+        const result = await scoreCandidates(question, candidates);
+        attempts.push({ attempt, query, table: result.table });
+        const maxScore = Math.max(0, ...result.table.map((row) => row.score));
+        if (maxScore > bestScore) {
+            best = result;
+            bestScore = maxScore;
+        }
+        if (maxScore >= CRAG_RELEVANCE_THRESHOLD || attempt >= CRAG_MAX_RETRIES) break;
+        query = await cragRewriteChain.invoke({ question, passages: result.table.map((row) => row.snippet).join("\n") });
+        attempt += 1;
+    }
+    return { kept: best!.kept, attempts };
+}
+
+// Wraps the bounded grade/retry loop as one named step so the pipeline visualizer can show every
+// attempt's scored candidate table, then builds citation context from the best attempt's kept docs.
+export const cragRetrieveAndBuildContext = (filter: Record<string, unknown>) => RunnableSequence.from([
+    RunnableLambda.from((question: string) => cragRetrieve(filter, question)).withConfig({ runName: "cragGrade" }),
+    RunnableLambda.from(({ kept, attempts }: { kept: DocumentInterface[]; attempts: CragAttempt[] }) => ({ ...buildContext(kept), attempts })),
 ]).withConfig({ runName: "retrieveAndBuildContext" });
