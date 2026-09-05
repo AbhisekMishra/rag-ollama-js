@@ -263,4 +263,36 @@ export const RAG_PIPELINE_STAGES: Record<RagMode, PipelineStageMeta[]> = {
         },
         answerLLM,
     ],
+    adaptive: [
+        {
+            id: "routeComplexity",
+            label: "Classify Complexity",
+            what: "Classifies the question as DIRECT (no retrieval needed), SIMPLE (one focused retrieval), or COMPOUND (split into sub-questions) — only one of the stages below actually runs, based on this classification.",
+            why: "Built as the capstone on top of naive and multi-hop retrieval: a simple factual question doesn't need the sub-question overhead multi-hop adds, and a compound one needs more than a single focused search — classifying complexity per-query picks the right amount of retrieval effort automatically.",
+            kind: "transform",
+        },
+        vectorRetrieve,
+        {
+            id: "decomposeQuestions",
+            label: "Decompose Question (if COMPOUND)",
+            what: "Only runs if classified COMPOUND: splits the question into 1-4 sub-questions.",
+            why: "Same rationale as the multi-hop mode this branch delegates to.",
+            kind: "transform",
+        },
+        {
+            id: "vectorRetrieveMany",
+            label: "Retrieve Per Sub-question (if COMPOUND)",
+            what: "Only runs if classified COMPOUND: retrieves for each sub-question in parallel.",
+            why: "Same rationale as multi-hop — each sub-question gets its own dedicated search.",
+            kind: "retrieve",
+        },
+        {
+            id: "buildHopContext",
+            label: "Group by Sub-question (if COMPOUND)",
+            what: "Only runs if classified COMPOUND: builds context with each sub-question's chunks grouped and labeled.",
+            why: "Same rationale as multi-hop — keeps hop-attributed evidence separate rather than merging it into one pool.",
+            kind: "score",
+        },
+        answerLLM,
+    ],
 };

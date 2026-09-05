@@ -105,6 +105,17 @@ export const questionEntitiesTemplate = PromptTemplate.fromTemplate(
     JSON:`
 );
 
+export const routeComplexityTemplate = PromptTemplate.fromTemplate(
+    `Classify the question below by complexity, given the conversation history. Reply with exactly one word:
+    DIRECT - small talk, opinion, or general knowledge that doesn't need looking anything up in a document
+    SIMPLE - a single, atomic factual question answerable from one focused search of the document
+    COMPOUND - a multi-part or compound question that would benefit from being split into sub-questions
+    Reply with ONLY one of: DIRECT, SIMPLE, COMPOUND
+    conversation history: {history}
+    question: {question}
+    classification:`
+);
+
 export const answerTemplate = PromptTemplate.fromTemplate(`You are a helpful and enthusiastic support bot who answers questions based on the provided context.
 The context is a list of numbered excerpts, each labeled "[Source N | Page P]" followed by its text.
 Your goal is to find the most relevant information from the context to answer the question.

@@ -58,6 +58,7 @@ function shapeStageData(name: string, output: unknown): unknown {
         case "routeQuery":
         case "decomposeQuestions":
         case "buildHopContext":
+        case "routeComplexity":
             return output;
         case "judgeSufficiency":
         case "cragGrade":
@@ -123,6 +124,7 @@ const LLM_STAGE_RUNNAMES: Record<string, string> = {
     hydeDraftLLM: "hydeDraft",
     routeQueryLLM: "routeQuery",
     decomposeQuestionsLLM: "decomposeQuestions",
+    routeComplexityLLM: "routeComplexity",
 };
 
 const encoder = new TextEncoder();
