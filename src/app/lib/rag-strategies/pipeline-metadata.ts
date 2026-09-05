@@ -170,4 +170,21 @@ export const RAG_PIPELINE_STAGES: Record<RagMode, PipelineStageMeta[]> = {
         },
         answerLLM,
     ],
+    "self-rag": [
+        {
+            id: "judgeSufficiency",
+            label: "Retrieve + Judge Sufficiency",
+            what: "Retrieves for the question, then asks the LLM to score (0–1) whether the retrieved context is actually sufficient to answer it. If not, and a hop remains, rewrites the question and retries — up to 2 hops.",
+            why: "Retrieval can come back thin or off-target. Checking sufficiency before generating (rather than after) lets a bad retrieval be corrected by rewriting the query, without needing to regenerate the final answer.",
+            kind: "retrieve",
+        },
+        answerLLM,
+        {
+            id: "critiqueGroundedness",
+            label: "Critique Groundedness",
+            what: "After the answer is generated, asks the LLM to score (0–1) how well it's actually supported by the retrieved context.",
+            why: "This is a reported score, not a retry gate — regenerating the answer to act on this critique would mean a second LLM call and a duplicated/broken streamed response. It's shown so you can see when the model answered beyond what the context actually supports.",
+            kind: "score",
+        },
+    ],
 };

@@ -37,6 +37,29 @@ export const compressionTemplate = PromptTemplate.fromTemplate(
     relevant sentences only:`
 );
 
+export const contextSufficiencyTemplate = PromptTemplate.fromTemplate(
+    `On a scale from 0.0 to 1.0, how sufficient is the following retrieved context to fully answer the question? Judge whether the information needed is present at all, not writing quality.
+    Reply with ONLY a number between 0 and 1, nothing else.
+    question: {question}
+    context: {context}
+    sufficiency score:`
+);
+
+export const selfRagRewriteTemplate = PromptTemplate.fromTemplate(
+    `The following retrieved context was judged insufficient to answer the question below. Rewrite the question using different terms or a different angle so a search is more likely to find the missing information. Reply with ONLY the rewritten question, nothing else.
+    question: {question}
+    insufficient context: {context}
+    rewritten question:`
+);
+
+export const groundednessTemplate = PromptTemplate.fromTemplate(
+    `On a scale from 0.0 to 1.0, how well is the following answer supported by the given context? A grounded answer only states things the context actually backs up. Judge support only, not writing quality.
+    Reply with ONLY a number between 0 and 1, nothing else.
+    context: {context}
+    answer: {answer}
+    groundedness score:`
+);
+
 export const answerTemplate = PromptTemplate.fromTemplate(`You are a helpful and enthusiastic support bot who answers questions based on the provided context.
 The context is a list of numbered excerpts, each labeled "[Source N | Page P]" followed by its text.
 Your goal is to find the most relevant information from the context to answer the question.

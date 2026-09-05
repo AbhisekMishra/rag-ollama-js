@@ -10,6 +10,7 @@ import { contextualCompressionChain } from "./contextual-compression";
 import { sentenceWindowChain } from "./sentence-window";
 import { parentDocumentChain } from "./parent-document";
 import { autoMergingChain } from "./auto-merging";
+import { selfRagChain } from "./self-rag";
 import type { RagStrategy } from "./types";
 import { DEFAULT_RAG_MODE, type RagMode } from "./modes";
 
@@ -27,6 +28,7 @@ export const RAG_STRATEGIES: Record<RagMode, RagStrategy> = {
     "sentence-window": sentenceWindowChain,
     "parent-document": parentDocumentChain,
     "auto-merging": autoMergingChain,
+    "self-rag": selfRagChain,
 };
 
 export function buildRagChain(mode: RagMode, filter: Record<string, unknown>): RunnableSequence {

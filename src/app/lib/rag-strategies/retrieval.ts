@@ -5,7 +5,7 @@ import type { DocumentInterface } from "@langchain/core/documents";
 import { retriever, hybridSearcher, sentenceRetriever, childRetriever } from "../supabase";
 import { buildContext } from "../../utils/helpers";
 import { llm } from "../ollama";
-import { rerankTemplate, compressionTemplate } from "../prompts";
+import { rerankTemplate, compressionTemplate, contextSufficiencyTemplate, selfRagRewriteTemplate } from "../prompts";
 
 // Retrieval piped into citation-context building — composed, not hand-orchestrated with
 // async/await — as one named runnable step shared by every strategy, so the chat route can
@@ -286,4 +286,68 @@ export const autoMergeRetrieveAndBuildContext = (filter: Record<string, unknown>
     childRetriever(filter, AUTO_MERGE_FETCH_COUNT).withConfig({ runName: "vectorRetrieve" }),
     RunnableLambda.from(autoMergeChunks).withConfig({ runName: "autoMergeChunks" }),
     RunnableLambda.from(buildContext),
+]).withConfig({ runName: "retrieveAndBuildContext" });
+
+const sufficiencyChain = RunnableSequence.from([
+    contextSufficiencyTemplate,
+    llm,
+    new StringOutputParser(),
+]);
+
+const selfRagRewriteChain = RunnableSequence.from([
+    selfRagRewriteTemplate,
+    llm,
+    new StringOutputParser(),
+]);
+
+export interface SelfRagAttempt {
+    hop: number;
+    query: string;
+    score: number;
+    prompt: string;
+    completion: string;
+}
+
+// Same "bare .invoke() never enters the traced graph" limitation as scoreRelevance/compressChunk
+// above — this is a pre-generation judgment call, not the streamed answer, so it doesn't need to.
+async function judgeSufficiency(question: string, context: string): Promise<{ score: number; prompt: string; completion: string }> {
+    const prompt = await contextSufficiencyTemplate.format({ question, context });
+    const completion = await sufficiencyChain.invoke({ question, context });
+    return { score: clamp01(parseFloat(completion)), prompt, completion };
+}
+
+const SELF_RAG_MAX_HOPS = 2;
+const SELF_RAG_SUFFICIENCY_THRESHOLD = 0.5;
+
+// Self-RAG's "capped hops" apply here, on the retrieval side: judge whether the retrieved
+// context is even sufficient to answer the question, and if not (and hops remain), rewrite the
+// query and retry. This is deliberately kept pre-generation — gating on a *post-hoc* critique of
+// the generated answer would require regenerating it, which would mean a second `answerLLM` call
+// and a broken/duplicated token stream to the client (see self-rag.ts for the groundedness half,
+// which runs once, after the single streamed answer, as a reported score rather than a retry gate).
+async function selfRagRetrieve(filter: Record<string, unknown>, question: string): Promise<{ docs: DocumentInterface[]; attempts: SelfRagAttempt[] }> {
+    let query = question;
+    let hop = 0;
+    const attempts: SelfRagAttempt[] = [];
+    let docs: DocumentInterface[] = [];
+    let judgment: { score: number; prompt: string; completion: string };
+    while (true) {
+        docs = await retriever(filter).invoke(query);
+        const { context } = buildContext(docs);
+        judgment = await judgeSufficiency(question, context);
+        attempts.push({ hop, query, ...judgment });
+        if (judgment.score >= SELF_RAG_SUFFICIENCY_THRESHOLD || hop >= SELF_RAG_MAX_HOPS) break;
+        query = await selfRagRewriteChain.invoke({ question, context });
+        hop += 1;
+    }
+    return { docs, attempts };
+}
+
+// Wraps the bounded judge/retry loop as one named step so the pipeline visualizer can show every
+// hop's query/score, then builds citation context from whichever hop's docs were finally kept.
+// `sources` stays at the top level of the output (alongside `context`/`attempts`) so route.ts's
+// generic `retrieveAndBuildContext` sources extraction keeps working unchanged.
+export const selfRagRetrieveAndBuildContext = (filter: Record<string, unknown>) => RunnableSequence.from([
+    RunnableLambda.from((question: string) => selfRagRetrieve(filter, question)).withConfig({ runName: "judgeSufficiency" }),
+    RunnableLambda.from(({ docs, attempts }: { docs: DocumentInterface[]; attempts: SelfRagAttempt[] }) => ({ ...buildContext(docs), attempts })),
 ]).withConfig({ runName: "retrieveAndBuildContext" });
