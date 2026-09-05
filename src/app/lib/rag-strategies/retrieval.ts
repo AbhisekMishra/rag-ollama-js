@@ -399,3 +399,47 @@ export const cragRetrieveAndBuildContext = (filter: Record<string, unknown>) => 
     RunnableLambda.from((question: string) => cragRetrieve(filter, question)).withConfig({ runName: "cragGrade" }),
     RunnableLambda.from(({ kept, attempts }: { kept: DocumentInterface[]; attempts: CragAttempt[] }) => ({ ...buildContext(kept), attempts })),
 ]).withConfig({ runName: "retrieveAndBuildContext" });
+
+// Multi-hop's citation context differs from multi-query's: multi-query flattens every
+// phrasing's hits into one undifferentiated deduped pool, but multi-hop keeps each
+// sub-question's chunks grouped and attributed under a "Sub-question K" header, so the answer
+// LLM can reason across hops explicitly instead of pattern-matching a merged blob. Citation
+// numbering/dedup still follows buildContext's exact contract (global 1..N, deduped by
+// pageContent, parallel {id, pageNumber} sources list) — just rendered with sub-question headers.
+function buildMultiHopContext(subQuestions: string[], docGroups: DocumentInterface[][]): { context: string; sources: { id: number; pageNumber: number }[] } {
+    const sourceNumbers = new Map<string, number>();
+    const orderedDocs: DocumentInterface[] = [];
+    const sections = subQuestions.map((subQuestion, i) => {
+        const lines = (docGroups[i] ?? []).map((doc) => {
+            let number = sourceNumbers.get(doc.pageContent);
+            if (number === undefined) {
+                number = orderedDocs.length + 1;
+                sourceNumbers.set(doc.pageContent, number);
+                orderedDocs.push(doc);
+            }
+            return `[Source ${number} | Page ${doc.metadata?.pageNumber ?? 0}]\n${doc.pageContent}`;
+        });
+        return `Sub-question ${i + 1}: ${subQuestion}\n${lines.join("\n\n")}`;
+    });
+    return {
+        context: sections.join("\n\n"),
+        sources: orderedDocs.map((doc, index) => ({ id: index + 1, pageNumber: doc.metadata?.pageNumber ?? 0 })),
+    };
+}
+
+// Multi-hop variant: fans retrieval out over the decomposed sub-questions (reuses the exact same
+// {list}->Document[][] shape as retrieveManyAndBuildContext's "vectorRetrieveMany" step, so the
+// pipeline visualizer's shared stage copy/shapeStageData case applies here too), carrying the
+// sub-questions alongside via a parallel branch (same pattern compressRetrieveAndBuildContext
+// uses to carry the question alongside its retrieved docs) so buildMultiHopContext can label
+// each group. Named "buildHopContext" rather than reusing "dedupeCandidates" since the output
+// shape differs — grouped/labeled context text, not a flat deduped Document[].
+export const retrieveMultiHopAndBuildContext = (filter: Record<string, unknown>) => RunnableSequence.from([
+    {
+        docGroups: RunnableLambda.from((subQuestions: string[]) => retriever(filter).batch(subQuestions)).withConfig({ runName: "vectorRetrieveMany" }),
+        subQuestions: new RunnablePassthrough<string[]>(),
+    },
+    RunnableLambda.from(({ docGroups, subQuestions }: { docGroups: DocumentInterface[][]; subQuestions: string[] }) =>
+        buildMultiHopContext(subQuestions, docGroups)
+    ).withConfig({ runName: "buildHopContext" }),
+]).withConfig({ runName: "retrieveAndBuildContext" });

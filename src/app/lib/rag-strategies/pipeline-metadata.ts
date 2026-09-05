@@ -229,4 +229,28 @@ export const RAG_PIPELINE_STAGES: Record<RagMode, PipelineStageMeta[]> = {
         },
         answerLLM,
     ],
+    "multi-hop": [
+        {
+            id: "decomposeQuestions",
+            label: "Decompose Question",
+            what: "Asks the LLM to split the question into 1-4 self-contained sub-questions if it's compound — a simple question just comes back as itself.",
+            why: "A compound question (\"compare X and Y\") often can't be answered by one retrieval pass — splitting it lets each part be searched for on its own terms.",
+            kind: "transform",
+        },
+        {
+            id: "vectorRetrieveMany",
+            label: "Retrieve Per Sub-question",
+            what: "Runs vector retrieval for each sub-question in parallel.",
+            why: "Each sub-question gets its own dedicated search, rather than one query trying to cover every part of a compound question at once.",
+            kind: "retrieve",
+        },
+        {
+            id: "buildHopContext",
+            label: "Group by Sub-question",
+            what: "Builds the citation context with each sub-question's retrieved chunks kept grouped and labeled under it, rather than merged into one undifferentiated pool.",
+            why: "Keeping each hop's evidence attributed to the sub-question it answers lets the model reason across hops explicitly (\"X is A, Y is B, so...\") instead of pattern-matching a flattened blob of chunks.",
+            kind: "score",
+        },
+        answerLLM,
+    ],
 };

@@ -67,6 +67,14 @@ export const groundednessTemplate = PromptTemplate.fromTemplate(
     groundedness score:`
 );
 
+export const subQuestionTemplate = PromptTemplate.fromTemplate(
+    `If the question below is a compound question with multiple parts, split it into 1-4 self-contained sub-questions that together cover it, using the conversation history to resolve pronouns and references. If it's already a single, simple question, just repeat it back unchanged as the only line.
+    Write one sub-question per line. No numbering, no bullets, no commentary — just the lines.
+    conversation history: {history}
+    question: {question}
+    sub-questions:`
+);
+
 export const routeQueryTemplate = PromptTemplate.fromTemplate(
     `Classify how to best answer the question below, given the conversation history. Reply with exactly one word:
     DIRECT - the question is small talk, opinion, or general knowledge that doesn't need looking anything up in a document (e.g. "hello", "what's 2+2", "what do you think of that")

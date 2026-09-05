@@ -4,18 +4,19 @@ https://github.com/user-attachments/assets/e75e3571-098d-4654-b000-5fd23142f64f
 
 ## Introduction
 
-RAG-Ollama-JS is a hands-on **learning project** for exploring Retrieval-Augmented Generation end-to-end — not a polished product. It's a Next.js app where you upload a PDF, chat with it, and can switch between thirteen different RAG strategies per-question to see how each one changes retrieval and the final answer, with a live pipeline visualizer and optional LangFuse tracing to inspect what actually happened at each stage.
+RAG-Ollama-JS is a hands-on **learning project** for exploring Retrieval-Augmented Generation end-to-end — not a polished product. It's a Next.js app where you upload a PDF, chat with it, and can switch between fourteen different RAG strategies per-question to see how each one changes retrieval and the final answer, with a live pipeline visualizer and optional LangFuse tracing to inspect what actually happened at each stage.
 
 Built with LangChain.js, Ollama (local/remote LLM + embeddings), and Supabase/pgvector for storage and retrieval.
 
 ## Features
 
-- **Thirteen RAG strategies, switchable per question** — grouped by which stage of the pipeline they change:
+- **Fourteen RAG strategies, switchable per question** — grouped by which stage of the pipeline they change:
   - **Retrieval strategy**: Naive RAG, Hybrid Search (keyword + vector, fused via RPC), Sentence-Window Retrieval, Parent-Document Retrieval, Auto-Merging Retrieval (like parent-document, but only promotes a chunk to its full parent when enough sibling children agree)
   - **Query transformation**: Query Condensing (default — rewrites follow-ups into standalone questions), Multi-Query (fans out over several phrasings), HyDE (retrieves on a hypothetical answer draft instead of the question)
   - **Post-retrieval**: Re-ranking (LLM scores 20 over-fetched candidates and keeps the top 4), Contextual Compression (LLM strips irrelevant sentences out of each retrieved chunk)
   - **Iterative / self-correcting**: Self-RAG (judges retrieved-context sufficiency before answering, rewriting the question and retrying up to 2 hops if it's thin, then reports a post-hoc groundedness score for the answer it gave), Corrective RAG / CRAG (grades every retrieved candidate's relevance and, if none clear the bar, rewrites the question and retries once)
   - **Agentic / routing**: Agentic / Router RAG (classifies the question as needing no retrieval, one focused retrieval, or a multi-phrasing fan-out, then delegates to the matching existing strategy)
+  - **Structural**: Multi-Hop (splits a compound question into sub-questions, retrieves separately for each, and keeps each sub-question's chunks grouped/attributed rather than merged into one pool)
 - **Live pipeline visualizer** — a step-by-step diagram of whichever strategy is selected, showing each stage go pending → active → done in real time, with the actual prompt/completion and retrieved chunks available behind a "show raw I/O" disclosure per stage. Also frozen per assistant message so past answers stay inspectable.
 - **Inline source citations** — the LLM cites `[Source N]`, the client turns those into clickable links that jump the embedded PDF to the right page, plus "Page N" chips as a citation-free fallback.
 - **Chunks viewer** — browse the raw stored rows across all three chunk indexes (parent chunks, sentences, child chunks) that back the different retrieval strategies.
