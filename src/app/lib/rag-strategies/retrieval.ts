@@ -249,3 +249,41 @@ export const parentDocumentRetrieveAndBuildContext = (filter: Record<string, unk
     RunnableLambda.from(expandToParent).withConfig({ runName: "expandToParent" }),
     RunnableLambda.from(buildContext),
 ]).withConfig({ runName: "retrieveAndBuildContext" });
+
+// Auto-merging retrieval reuses the same child_documents table as parent-document retrieval —
+// the difference is retrieval-side policy, not storage. Parent-document always promotes every
+// hit to its full parent; auto-merging only promotes a parent when enough of its *sibling*
+// children were independently retrieved (real evidence several narrow matches agree on the
+// same parent), otherwise it's cheaper/tighter to leave a lone hit at child granularity rather
+// than pull in a whole parent chunk on the strength of one match.
+const AUTO_MERGE_FETCH_COUNT = 12;
+const AUTO_MERGE_THRESHOLD = 2;
+
+function autoMergeChunks(docs: DocumentInterface[]): CompressibleDoc[] {
+    const groups = new Map<string, DocumentInterface[]>();
+    for (const doc of docs) {
+        const parentText = (doc.metadata?.parentText as string | undefined) ?? doc.pageContent;
+        const group = groups.get(parentText);
+        if (group) group.push(doc);
+        else groups.set(parentText, [doc]);
+    }
+    const merged: CompressibleDoc[] = [];
+    for (const [parentText, siblings] of groups) {
+        if (siblings.length >= AUTO_MERGE_THRESHOLD) {
+            merged.push({ pageContent: parentText, metadata: siblings[0].metadata });
+        } else {
+            for (const doc of siblings) merged.push({ pageContent: doc.pageContent, metadata: doc.metadata });
+        }
+    }
+    return merged;
+}
+
+// Auto-merging variant: over-fetches child-chunk-level candidates (more than parent-document's
+// single-hit-per-parent assumption needs, so enough siblings under the same parent have a
+// chance to show up together), then merges only the parents with enough retrieved sibling
+// evidence — see autoMergeChunks above.
+export const autoMergeRetrieveAndBuildContext = (filter: Record<string, unknown>) => RunnableSequence.from([
+    childRetriever(filter, AUTO_MERGE_FETCH_COUNT).withConfig({ runName: "vectorRetrieve" }),
+    RunnableLambda.from(autoMergeChunks).withConfig({ runName: "autoMergeChunks" }),
+    RunnableLambda.from(buildContext),
+]).withConfig({ runName: "retrieveAndBuildContext" });

@@ -159,4 +159,15 @@ export const RAG_PIPELINE_STAGES: Record<RagMode, PipelineStageMeta[]> = {
         },
         answerLLM,
     ],
+    "auto-merging": [
+        childVectorRetrieve,
+        {
+            id: "autoMergeChunks",
+            label: "Auto-Merge Siblings",
+            what: "Groups the retrieved child chunks by their shared parent, and only merges a group up to its full parent chunk if at least 2 sibling children were retrieved together — a lone hit stays at child granularity.",
+            why: "Parent-document retrieval always expands every hit, even a single narrow match. Requiring corroborating sibling evidence before promoting to the full parent avoids pulling in a whole chunk's worth of extra context on the strength of one match.",
+            kind: "score",
+        },
+        answerLLM,
+    ],
 };

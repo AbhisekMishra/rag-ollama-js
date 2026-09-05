@@ -4,14 +4,14 @@ https://github.com/user-attachments/assets/e75e3571-098d-4654-b000-5fd23142f64f
 
 ## Introduction
 
-RAG-Ollama-JS is a hands-on **learning project** for exploring Retrieval-Augmented Generation end-to-end — not a polished product. It's a Next.js app where you upload a PDF, chat with it, and can switch between nine different RAG strategies per-question to see how each one changes retrieval and the final answer, with a live pipeline visualizer and optional LangFuse tracing to inspect what actually happened at each stage.
+RAG-Ollama-JS is a hands-on **learning project** for exploring Retrieval-Augmented Generation end-to-end — not a polished product. It's a Next.js app where you upload a PDF, chat with it, and can switch between ten different RAG strategies per-question to see how each one changes retrieval and the final answer, with a live pipeline visualizer and optional LangFuse tracing to inspect what actually happened at each stage.
 
 Built with LangChain.js, Ollama (local/remote LLM + embeddings), and Supabase/pgvector for storage and retrieval.
 
 ## Features
 
-- **Nine RAG strategies, switchable per question** — grouped by which stage of the pipeline they change:
-  - **Retrieval strategy**: Naive RAG, Hybrid Search (keyword + vector, fused via RPC), Sentence-Window Retrieval, Parent-Document Retrieval
+- **Ten RAG strategies, switchable per question** — grouped by which stage of the pipeline they change:
+  - **Retrieval strategy**: Naive RAG, Hybrid Search (keyword + vector, fused via RPC), Sentence-Window Retrieval, Parent-Document Retrieval, Auto-Merging Retrieval (like parent-document, but only promotes a chunk to its full parent when enough sibling children agree)
   - **Query transformation**: Query Condensing (default — rewrites follow-ups into standalone questions), Multi-Query (fans out over several phrasings), HyDE (retrieves on a hypothetical answer draft instead of the question)
   - **Post-retrieval**: Re-ranking (LLM scores 20 over-fetched candidates and keeps the top 4), Contextual Compression (LLM strips irrelevant sentences out of each retrieved chunk)
 - **Live pipeline visualizer** — a step-by-step diagram of whichever strategy is selected, showing each stage go pending → active → done in real time, with the actual prompt/completion and retrieved chunks available behind a "show raw I/O" disclosure per stage. Also frozen per assistant message so past answers stay inspectable.
@@ -30,7 +30,7 @@ Automated scoring is planned via [**raglens**](https://github.com/AbhisekMishra/
 - **faithfulness** — decomposes the answer into factual statements and verifies each against the retrieved contexts
 - **answer_relevancy** — LLM-judged relevance of the answer to the question
 
-`raglens` is already listed as a dependency (`package.json`) but is **not yet wired into this app** — the plan is a golden question set run through each `ragMode`, scored with `raglens`, and pushed to LangFuse so the nine strategies above can be compared quantitatively instead of by eye.
+`raglens` is already listed as a dependency (`package.json`) but is **not yet wired into this app** — the plan is a golden question set run through each `ragMode`, scored with `raglens`, and pushed to LangFuse so the strategies above can be compared quantitatively instead of by eye.
 
 ## Prerequisites
 
