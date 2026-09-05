@@ -93,6 +93,18 @@ export const directAnswerTemplate = PromptTemplate.fromTemplate(
     answer:`
 );
 
+export const graphExtractionTemplate = PromptTemplate.fromTemplate(
+    `Extract named entities and relations from the passage below. Reply with ONLY a JSON object of this exact shape: {{"entities": ["name", ...], "relations": [{{"source": "name", "relation": "short verb phrase", "target": "name"}}]}}. Use short, consistent entity names (e.g. always "Marie Curie", never "she" or "the scientist"). If there are no clear entities or relations, reply with {{"entities": [], "relations": []}}.
+    passage: {passage}
+    JSON:`
+);
+
+export const questionEntitiesTemplate = PromptTemplate.fromTemplate(
+    `List the named entities (people, places, organizations, products, or other proper nouns) mentioned in the question below. Reply with ONLY a JSON array of short entity name strings, e.g. ["Marie Curie", "Poland"]. If there are none, reply with [].
+    question: {question}
+    JSON:`
+);
+
 export const answerTemplate = PromptTemplate.fromTemplate(`You are a helpful and enthusiastic support bot who answers questions based on the provided context.
 The context is a list of numbered excerpts, each labeled "[Source N | Page P]" followed by its text.
 Your goal is to find the most relevant information from the context to answer the question.

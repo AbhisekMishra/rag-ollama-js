@@ -1,5 +1,5 @@
 // Client-safe: no LangChain/LLM imports here, so this can be imported from UI components.
-export type RagMode = "naive" | "condense" | "multi-query" | "hyde" | "hybrid" | "rerank" | "contextual-compression" | "sentence-window" | "parent-document" | "auto-merging" | "self-rag" | "crag" | "agentic" | "multi-hop";
+export type RagMode = "naive" | "condense" | "multi-query" | "hyde" | "hybrid" | "rerank" | "contextual-compression" | "sentence-window" | "parent-document" | "auto-merging" | "self-rag" | "crag" | "agentic" | "multi-hop" | "graph";
 
 // Which stage of the pipeline each mode modifies, so the UI can group modes by
 // what they actually change rather than listing them as one flat, undifferentiated list.
@@ -31,4 +31,5 @@ export const RAG_MODES: { value: RagMode; label: string; stage: RagStage }[] = [
     { value: "crag", label: "Corrective RAG (CRAG)", stage: "iterative" },
     { value: "agentic", label: "Agentic / Router RAG", stage: "agentic" },
     { value: "multi-hop", label: "Multi-Hop", stage: "structural" },
+    { value: "graph", label: "Graph RAG", stage: "structural" },
 ];

@@ -3,6 +3,7 @@ import { StringOutputParser } from "@langchain/core/output_parsers";
 import type { DocumentInterface } from "@langchain/core/documents";
 
 import { retriever, hybridSearcher, sentenceRetriever, childRetriever } from "../supabase";
+import { graphSearcher } from "../graph-rag";
 import { buildContext } from "../../utils/helpers";
 import { llm } from "../ollama";
 import { rerankTemplate, compressionTemplate, contextSufficiencyTemplate, selfRagRewriteTemplate, cragRewriteTemplate } from "../prompts";
@@ -442,4 +443,12 @@ export const retrieveMultiHopAndBuildContext = (filter: Record<string, unknown>)
     RunnableLambda.from(({ docGroups, subQuestions }: { docGroups: DocumentInterface[][]; subQuestions: string[] }) =>
         buildMultiHopContext(subQuestions, docGroups)
     ).withConfig({ runName: "buildHopContext" }),
+]).withConfig({ runName: "retrieveAndBuildContext" });
+
+// Graph variant: entity/relation traversal (see graph-rag.ts) fused in directly, bypassing
+// SupabaseVectorStore the same way hybridRetrieveAndBuildContext does — graphSearcher's fallback
+// path needs the raw query text (not just its embedding) to re-run plain vector retrieval.
+export const graphRetrieveAndBuildContext = (filter: Record<string, unknown>) => RunnableSequence.from([
+    RunnableLambda.from(graphSearcher(filter)).withConfig({ runName: "graphSearch" }),
+    RunnableLambda.from(buildContext),
 ]).withConfig({ runName: "retrieveAndBuildContext" });

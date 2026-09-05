@@ -253,4 +253,14 @@ export const RAG_PIPELINE_STAGES: Record<RagMode, PipelineStageMeta[]> = {
         },
         answerLLM,
     ],
+    graph: [
+        {
+            id: "graphSearch",
+            label: "Graph Traversal",
+            what: "Extracts the named entities mentioned in the question, looks them up in a small entity/relation graph built at ingestion time, expands one hop via related entities, and pulls back every chunk that mentions any of them. Falls back to plain vector retrieval if no entities matched.",
+            why: "Vector similarity finds chunks that read similarly to the question, but can miss chunks connected to it only through a shared entity (e.g. two chunks that both mention the same person but use different wording). Traversing the graph surfaces those connections directly.",
+            kind: "retrieve",
+        },
+        answerLLM,
+    ],
 };

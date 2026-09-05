@@ -298,3 +298,51 @@ BEGIN
     WHERE metadata @> FORMAT('{"userId": "%s"}', userid)::JSONB;
 END;
 $$ LANGUAGE plpgsql;
+
+
+-- ============================================================
+-- STEP 12: Graph RAG (entity/relation graph + traversal)
+-- Adds a small knowledge graph extracted at ingestion time: entities mentioned in each
+-- parent chunk, which chunk(s) mention each entity, and relations between entity pairs.
+-- Unlike the other STEPs above, these are plain typed columns (not jsonb metadata) — there's
+-- no embedding column here (retrieval matches entities by name, not vector similarity) and
+-- traversal needs real relational joins/foreign keys, which plain columns suit better than
+-- jsonb containment filtering. chunk_id references `documents.id` directly. Used by the
+-- "graph" RAG mode — without this step, that mode errors at query time (same as hybrid's
+-- STEP 9, sentence-window's STEP 10, and parent-document's STEP 11 dependencies). Safe to
+-- run on an existing project.
+-- ============================================================
+CREATE TABLE graph_entities (
+  id bigserial PRIMARY KEY,
+  name text NOT NULL,      -- normalized (trimmed, lowercased) entity name
+  type text,                -- free-form entity type from extraction, e.g. "person" (nullable)
+  user_id text NOT NULL
+);
+
+CREATE INDEX graph_entities_user_id_name_idx ON graph_entities (user_id, name);
+
+CREATE TABLE graph_entity_mentions (
+  entity_id bigint NOT NULL REFERENCES graph_entities(id) ON DELETE CASCADE,
+  chunk_id bigint NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+  PRIMARY KEY (entity_id, chunk_id)
+);
+
+CREATE TABLE graph_relations (
+  id bigserial PRIMARY KEY,
+  source_entity_id bigint NOT NULL REFERENCES graph_entities(id) ON DELETE CASCADE,
+  target_entity_id bigint NOT NULL REFERENCES graph_entities(id) ON DELETE CASCADE,
+  label text,
+  user_id text NOT NULL
+);
+
+CREATE INDEX graph_relations_user_id_idx ON graph_relations (user_id);
+
+CREATE OR REPLACE FUNCTION delete_graph_data_by_user(userid TEXT)
+RETURNS VOID AS $$
+BEGIN
+    DELETE FROM graph_relations WHERE user_id = userid;
+    DELETE FROM graph_entity_mentions
+      WHERE entity_id IN (SELECT id FROM graph_entities WHERE user_id = userid);
+    DELETE FROM graph_entities WHERE user_id = userid;
+END;
+$$ LANGUAGE plpgsql;

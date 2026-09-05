@@ -5,6 +5,7 @@ import { RecursiveCharacterTextSplitter } from "@langchain/textsplitters";
 import { vectorStore, sentenceVectorStore, childVectorStore } from '@/app/lib/supabase';
 import { buildSentenceWindowDocuments } from '@/app/lib/sentence-window';
 import { buildChildDocuments } from '@/app/lib/parent-document';
+import { extractGraphData, insertGraphData } from '@/app/lib/graph-rag';
 
 export async function GET(req: Request) {
     const userId = req.headers.get('User-Id');
@@ -78,8 +79,21 @@ export async function POST(req: Request) {
     const { error: deleteChildError } = await supabaseClient.rpc('delete_child_documents_by_user', { userid: userId });
     if (deleteChildError) throw new Response('Error in deleting child embeddings!', { status: 400 });
 
-    await vectorStore().addDocuments(docOutput);
+    const { error: deleteGraphError } = await supabaseClient.rpc('delete_graph_data_by_user', { userid: userId });
+    if (deleteGraphError) throw new Response('Error in deleting graph data!', { status: 400 });
+
+    const insertedDocumentIds = await vectorStore().addDocuments(docOutput);
     await sentenceVectorStore().addDocuments(sentenceDocOutput);
     await childVectorStore().addDocuments(childDocOutput);
+
+    // Entity/relation extraction for the "graph" RAG mode (see lib/graph-rag.ts and
+    // supabaseScripts.txt STEP 12) — one extra LLM call per parent chunk, the same kind of
+    // ingestion-cost tradeoff sentence-window's/parent-document's extra embedding calls are.
+    // Needs the parent chunks' actual `documents.id` values (only known after insertion above)
+    // so graph_entity_mentions can reference the right rows.
+    const chunksForGraph = docOutput.map((doc, i) => ({ id: Number(insertedDocumentIds[i]), text: doc.pageContent }));
+    const graphPlan = await extractGraphData(chunksForGraph);
+    await insertGraphData(graphPlan, userId);
+
     return new Response('', { status: 201 });
 }

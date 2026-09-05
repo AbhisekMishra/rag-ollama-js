@@ -38,6 +38,7 @@ function shapeStageData(name: string, output: unknown): unknown {
         case "vectorRetrieve":
         case "dedupeCandidates":
         case "hybridSearch":
+        case "graphSearch":
         case "expandWindow":
         case "expandToParent":
         case "autoMergeChunks":

@@ -14,6 +14,7 @@ import { selfRagChain } from "./self-rag";
 import { cragChain } from "./crag";
 import { agenticChain } from "./agentic";
 import { multiHopChain } from "./multi-hop";
+import { graphChain } from "./graph";
 import type { RagStrategy } from "./types";
 import { DEFAULT_RAG_MODE, type RagMode } from "./modes";
 
@@ -35,6 +36,7 @@ export const RAG_STRATEGIES: Record<RagMode, RagStrategy> = {
     crag: cragChain,
     agentic: agenticChain,
     "multi-hop": multiHopChain,
+    graph: graphChain,
 };
 
 export function buildRagChain(mode: RagMode, filter: Record<string, unknown>): RunnableSequence {
