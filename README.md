@@ -25,15 +25,15 @@ Built with LangChain.js, Ollama (local/remote LLM + embeddings), and Supabase/pg
 
 ## Why this project exists
 
-This repo exists to build a working, comparable implementation of the major RAG techniques rather than reading about them — each strategy is a small, isolated LangChain runnable composition so its effect can be studied in isolation via the pipeline visualizer and LangFuse traces. Planned next steps include a RAGAS-style automated evaluation layer (faithfulness / answer relevancy) and a LangFuse-backed leaderboard for comparing strategies quantitatively rather than just eyeballing answers.
+This repo exists to build a working, comparable implementation of the major RAG techniques rather than reading about them — each strategy is a small, isolated LangChain runnable composition so its effect can be studied in isolation via the pipeline visualizer, LangFuse traces, and the eval harness below.
 
 ## Evaluation (raglens)
 
-Automated scoring is planned via [**raglens**](https://github.com/AbhisekMishra/raglens) — a small TypeScript package (also built by the author of this repo) that reimplements RAGAS-style RAG metrics without requiring Python. It scores a `{question, answer, contexts}` sample against a pluggable `Judge` (an Ollama adapter ships built-in) and currently provides:
+Automated scoring is wired in via [**raglens**](https://github.com/AbhisekMishra/raglens) — a small TypeScript package (also built by the author of this repo) that reimplements RAGAS-style RAG metrics without requiring Python. It scores a `{question, answer, contexts}` sample against a pluggable `Judge` (an Ollama adapter ships built-in) and currently provides:
 - **faithfulness** — decomposes the answer into factual statements and verifies each against the retrieved contexts
 - **answer_relevancy** — LLM-judged relevance of the answer to the question
 
-`raglens` is already listed as a dependency (`package.json`) but is **not yet wired into this app** — the plan is a golden question set run through each `ragMode`, scored with `raglens`, and pushed to LangFuse so the strategies above can be compared quantitatively instead of by eye.
+Run `npm run eval` (optionally `-- --userId=<id>`, default `eval-user`) to run every registered RAG mode against a small fixed golden question set (`src/app/lib/eval/goldenSet.ts`, currently 5 questions about "Attention Is All You Need") and print a per-mode faithfulness/answer_relevancy comparison table — **you need that PDF already uploaded under the same `userId` first**. If `LANGFUSE_PUBLIC_KEY`/`LANGFUSE_SECRET_KEY` are set, each question's scores are also pushed back to its own trace in LangFuse. See `CLAUDE.md`'s "Evaluation (Phase 2)" section for how the harness works and its known limitations (small local judge model self-judging its own answers; a full run's LLM-call cost).
 
 ## Prerequisites
 
@@ -117,9 +117,12 @@ src/
 │   │   ├── sentence-window.ts
 │   │   ├── parent-document.ts
 │   │   ├── graph-rag.ts
+│   │   ├── eval/              # Golden set + raglens eval harness (npm run eval)
 │   │   └── prompts.ts        # All prompt templates
 │   └── utils/                # Helper functions and centralized env config
 └── instrumentation.ts        # LangFuse/OpenTelemetry wiring
+scripts/
+└── eval.ts                    # npm run eval entrypoint
 ```
 
 See [`CLAUDE.md`](CLAUDE.md) for a deep dive into how each RAG strategy and the streaming/citation/visualizer pipeline actually works.

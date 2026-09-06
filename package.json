@@ -6,7 +6,8 @@
     "dev": "next dev --turbopack",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "eval": "tsx --env-file=.env scripts/eval.ts"
   },
   "dependencies": {
     "@langchain/community": "^1.1.29",
@@ -41,6 +42,7 @@
     "eslint-config-next": "^15.5.20",
     "postcss": "^8.5.16",
     "tailwindcss": "^3.4.19",
+    "tsx": "^4.23.13",
     "typescript": "^5.9.3"
   }
 }
