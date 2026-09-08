@@ -33,7 +33,7 @@ Automated scoring is wired in via [**raglens**](https://github.com/AbhisekMishra
 - **faithfulness** — decomposes the answer into factual statements and verifies each against the retrieved contexts
 - **answer_relevancy** — LLM-judged relevance of the answer to the question
 
-Run `npm run eval` (optionally `-- --userId=<id>`, default `eval-user`) to run every registered RAG mode against a small fixed golden question set (`src/app/lib/eval/goldenSet.ts`, currently 5 questions about "Attention Is All You Need") and print a per-mode faithfulness/answer_relevancy comparison table — **you need that PDF already uploaded under the same `userId` first**. If `LANGFUSE_PUBLIC_KEY`/`LANGFUSE_SECRET_KEY` are set, each question's scores are also pushed back to its own trace in LangFuse. See `CLAUDE.md`'s "Evaluation (Phase 2)" section for how the harness works and its known limitations (small local judge model self-judging its own answers; a full run's LLM-call cost).
+Run `npm run eval` (optionally `-- --userId=<id>`, default `eval-user`) to run every registered RAG mode against a small fixed golden question set (`src/app/lib/eval/goldenSet.ts`, currently 10 questions about "Attention Is All You Need") and print a per-mode faithfulness/answer_relevancy comparison table — **you need that PDF already uploaded under the same `userId` first**. If `LANGFUSE_PUBLIC_KEY`/`LANGFUSE_SECRET_KEY` are set, each question's scores are also pushed back to its own trace in LangFuse. Set `OLLAMA_JUDGE_MODEL` to use a separate (ideally larger) model as the judge instead of the same model that answered the questions — otherwise it self-judges. See `CLAUDE.md`'s "Evaluation (Phase 2)" section for how the harness works and its known limitations.
 
 ## Prerequisites
 

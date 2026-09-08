@@ -43,14 +43,16 @@ async function main() {
     const runTag = `eval-run:${new Date().toISOString()}`;
 
     console.log(`Running Phase 2 eval against userId="${userId}" — assumes "${EVAL_DOCUMENT}" is the uploaded document for that user.`);
-    console.log(`Judge model: ${env.ollama.llm.model} (same model the chains answer with — self-judging bias, documented in CLAUDE.md).`);
     if (!env.langfuse.publicKey) {
         console.log("LANGFUSE_PUBLIC_KEY not set — scores will be computed but not pushed anywhere.");
     }
 
-    // Same judge model that generates the answers judges them here — a real limitation (see
-    // CLAUDE.md's Evaluation section), not solved in this pass.
-    const judge = createOllamaJudge(env.ollama.llm);
+    // Prefers a separate OLLAMA_JUDGE_MODEL so the judge isn't the same model that generated the
+    // answers being judged (self-judging bias) — falls back to the chat model if unset, same as
+    // before this env var existed.
+    const judgeModel = env.ollama.judgeModel || env.ollama.llm.model;
+    console.log(`Judge model: ${judgeModel}${judgeModel === env.ollama.llm.model ? " (same model the chains answer with — self-judging bias; set OLLAMA_JUDGE_MODEL to use a separate one)" : " (separate from the answering model)"}.`);
+    const judge = createOllamaJudge({ baseUrl: env.ollama.llm.baseUrl, model: judgeModel });
 
     const rows: { mode: string; faithfulness: string; answerRelevancy: string }[] = [];
 

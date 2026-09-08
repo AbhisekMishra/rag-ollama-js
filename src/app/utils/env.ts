@@ -11,7 +11,11 @@ export const env = {
         embeddings: {
             baseUrl: process.env.OLLAMA_EMBEDDINGS_BASE_URL || '',
             model: process.env.OLLAMA_EMBEDDINGS_MODEL || '',
-        }
+        },
+        // Optional — used only by scripts/eval.ts. Falls back to the chat model (OLLAMA_LLM_MODEL)
+        // when unset, meaning the model judges its own answers (a real bias, see CLAUDE.md's
+        // Evaluation section). Same base URL as the chat model — no separate judge server assumed.
+        judgeModel: process.env.OLLAMA_JUDGE_MODEL || '',
     },
     // Optional — tracing is skipped if keys are absent
     langfuse: {
