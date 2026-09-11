@@ -18,7 +18,7 @@ interface ChainEvalResult {
 // appends a critiqueGroundedness step returning {answer, groundedness}; agentic/adaptive's output
 // depends on which RunnableBranch arm fired). Reading the named "answerLLM" token stream and the
 // named "retrieveAndBuildContext" step's output sidesteps that entirely, regardless of mode.
-async function runChainForEval(mode: RagMode, filter: Record<string, unknown>, question: string, tags: string[]): Promise<ChainEvalResult> {
+async function attemptChainForEval(mode: RagMode, filter: Record<string, unknown>, question: string, tags: string[]): Promise<ChainEvalResult> {
     const handler = new CallbackHandler({
         userId: typeof filter.userId === "string" ? filter.userId : undefined,
         tags: ["rag-eval", `rag-mode:${mode}`, ...tags],
@@ -41,7 +41,36 @@ async function runChainForEval(mode: RagMode, filter: Record<string, unknown>, q
     return { answer, context, traceId: handler.last_trace_id };
 }
 
-// LangFuse's currently-installed SDKs (@langfuse/core/langchain/otel/tracing, all 5.9.1) have no
+const MAX_CHAIN_RETRIES = 2;
+const RETRY_DELAY_MS = 2000;
+
+function sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// Local Ollama streaming occasionally drops a response mid-stream ("Did not receive done or
+// success response in stream", from the `ollama` npm client) under the sustained sequential
+// call volume a full eval run makes — observed reproducibly (same mode, same error) across
+// multiple full-run attempts, with Ollama itself healthy immediately after each failure. Root
+// cause wasn't pinned down (client-library/transport issue, not this app's chain logic) —
+// retrying the same call after a short pause reliably works around it, so a transient failure
+// doesn't abort an otherwise-long run.
+async function runChainForEval(mode: RagMode, filter: Record<string, unknown>, question: string, tags: string[]): Promise<ChainEvalResult> {
+    let lastError: unknown;
+    for (let attempt = 0; attempt <= MAX_CHAIN_RETRIES; attempt++) {
+        try {
+            return await attemptChainForEval(mode, filter, question, tags);
+        } catch (error) {
+            lastError = error;
+            const message = error instanceof Error ? error.message : String(error);
+            console.error(`[${mode}] chain execution failed (attempt ${attempt + 1}/${MAX_CHAIN_RETRIES + 1}): ${message}`);
+            if (attempt < MAX_CHAIN_RETRIES) await sleep(RETRY_DELAY_MS);
+        }
+    }
+    throw lastError;
+}
+
+// LangFuse's currently-installed SDKs (@langfuse/core/langchain/otel/tracing, all 5.11.0) have no
 // ergonomic score-create helper — their `Scores` class is read-only, and constructing the
 // Fern-generated `LangfuseAPIClient` for one write call isn't worth the ambiguity. This is the
 // same stable, documented ingestion REST shape those SDKs wrap internally (a `score-create` batch
