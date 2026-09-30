@@ -6,6 +6,8 @@ import { evaluate, faithfulness, answerRelevancy, type Judge, type Sample, type 
 import { buildRagChain, type RagMode } from "../rag-strategies";
 import { env } from "../../utils/env";
 import { GOLDEN_SET } from "./goldenSet";
+import { goldenItemId } from "./dataset";
+import { langfuseFetch } from "./langfuseApi";
 
 interface ChainEvalResult {
     answer: string;
@@ -120,6 +122,22 @@ export async function runEvalForMode(mode: RagMode, filter: Record<string, unkno
             pushScoreToLangfuse(traceIds[i], metricName, score, reason)
         )
     ));
+
+    // Link each trace to its dataset item as one dataset run per mode+eval-run, so LangFuse's
+    // dataset "Runs" view compares modes side by side. Requires `npm run langfuse:sync` to have
+    // created the dataset first; a failure here shouldn't discard the computed scores.
+    await Promise.all(traceIds.map(async (traceId, i) => {
+        if (!traceId) return;
+        try {
+            await langfuseFetch("/api/public/dataset-run-items", {
+                runName: `${mode} | ${runTag}`,
+                datasetItemId: goldenItemId(i),
+                traceId,
+            });
+        } catch (error) {
+            console.error(`[${mode}] could not link trace to dataset item (run langfuse:sync first?):`, error instanceof Error ? error.message : error);
+        }
+    }));
 
     return summary;
 }

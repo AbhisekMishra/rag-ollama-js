@@ -36,6 +36,12 @@ async function registerLangfuseTracing(): Promise<{ shutdown: () => Promise<void
     return provider;
 }
 
+// --modes=a,b,c restricts the run to those modes (e.g. to resume after a failure).
+function parseModes(): string[] | null {
+    const arg = process.argv.find((a) => a.startsWith("--modes="));
+    return arg ? arg.slice("--modes=".length).split(",").map((m) => m.trim()).filter(Boolean) : null;
+}
+
 async function main() {
     const tracerProvider = await registerLangfuseTracing();
 

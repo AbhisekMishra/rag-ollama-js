@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "eval": "tsx --env-file=.env scripts/eval.ts"
+    "eval": "tsx --env-file=.env scripts/eval.ts",
+    "langfuse:sync": "tsx --env-file=.env scripts/langfuse-sync.ts"
   },
   "dependencies": {
     "@langchain/community": "^1.1.29",
