@@ -4,22 +4,22 @@ https://github.com/user-attachments/assets/e75e3571-098d-4654-b000-5fd23142f64f
 
 ## Introduction
 
-RAG-Ollama-JS is a hands-on **learning project** for exploring Retrieval-Augmented Generation end-to-end — not a polished product. It's a Next.js app where you upload a PDF, chat with it, and can switch between sixteen different RAG strategies per-question to see how each one changes retrieval and the final answer, with a live pipeline visualizer and optional LangFuse tracing to inspect what actually happened at each stage.
+RAG-Ollama-JS is a hands-on **learning project** for exploring Retrieval-Augmented Generation end-to-end — not a polished product. It's a Next.js app where you upload a PDF, chat with it, and can switch between twenty different RAG strategies per-question to see how each one changes retrieval and the final answer, with a live pipeline visualizer and optional LangFuse tracing to inspect what actually happened at each stage.
 
 Built with LangChain.js, Ollama (local/remote LLM + embeddings), and Supabase/pgvector for storage and retrieval.
 
 ## Features
 
-- **Sixteen RAG strategies, switchable per question** — grouped by which stage of the pipeline they change:
-  - **Retrieval strategy**: Naive RAG, Hybrid Search (keyword + vector, fused via RPC), Sentence-Window Retrieval, Parent-Document Retrieval, Auto-Merging Retrieval (like parent-document, but only promotes a chunk to its full parent when enough sibling children agree)
-  - **Query transformation**: Query Condensing (default — rewrites follow-ups into standalone questions), Multi-Query (fans out over several phrasings), HyDE (retrieves on a hypothetical answer draft instead of the question)
-  - **Post-retrieval**: Re-ranking (LLM scores 20 over-fetched candidates and keeps the top 4), Contextual Compression (LLM strips irrelevant sentences out of each retrieved chunk)
-  - **Iterative / self-correcting**: Self-RAG (judges retrieved-context sufficiency before answering, rewriting the question and retrying up to 2 hops if it's thin, then reports a post-hoc groundedness score for the answer it gave), Corrective RAG / CRAG (grades every retrieved candidate's relevance and, if none clear the bar, rewrites the question and retries once)
+- **Twenty RAG strategies, switchable per question** — grouped by which stage of the pipeline they change:
+  - **Retrieval strategy**: Naive RAG, Hybrid Search (keyword + vector, fused via RPC), Sentence-Window Retrieval, Parent-Document Retrieval, Auto-Merging Retrieval (like parent-document, but only promotes a chunk to its full parent when enough sibling children agree), RAPTOR (a recursive LLM-summary tree built at ingestion, so broad questions can match section summaries and narrow ones match leaf chunks)
+  - **Query transformation**: Query Condensing (default — rewrites follow-ups into standalone questions), Multi-Query (fans out over several phrasings), HyDE (retrieves on a hypothetical answer draft instead of the question), RAG-Fusion (multi-query, but the per-phrasing rankings are merged with reciprocal rank fusion instead of deduped)
+  - **Post-retrieval**: Re-ranking (LLM scores 20 over-fetched candidates and keeps the top 4), Contextual Compression (LLM strips irrelevant sentences out of each retrieved chunk), Speculative RAG (drafts an answer from each of several evidence subsets and a verifier picks the best-supported subset)
+  - **Iterative / self-correcting**: Self-RAG (judges retrieved-context sufficiency before answering, rewriting the question and retrying up to 2 hops if it's thin, then reports a post-hoc groundedness score for the answer it gave), Corrective RAG / CRAG (grades every retrieved candidate's relevance and, if none clear the bar, rewrites the question and retries once), FLARE (drafts a tentative answer and retrieves only for the sentences the model isn't confident in)
   - **Agentic / routing**: Agentic / Router RAG (classifies the question as needing no retrieval, one focused retrieval, or a multi-phrasing fan-out, then delegates to the matching existing strategy), Adaptive RAG (the capstone — classifies question complexity and delegates to naive or multi-hop retrieval accordingly, built directly on top of those two modules)
   - **Structural**: Multi-Hop (splits a compound question into sub-questions, retrieves separately for each, and keeps each sub-question's chunks grouped/attributed rather than merged into one pool), Graph RAG (extracts an entity/relation graph at ingestion, then traverses it from entities mentioned in the question instead of a vector search, falling back to vector retrieval if none matched)
 - **Live pipeline visualizer** — a step-by-step diagram of whichever strategy is selected, showing each stage go pending → active → done in real time, with the actual prompt/completion and retrieved chunks available behind a "show raw I/O" disclosure per stage. Also frozen per assistant message so past answers stay inspectable.
 - **Inline source citations** — the LLM cites `[Source N]`, the client turns those into clickable links that jump the embedded PDF to the right page, plus "Page N" chips as a citation-free fallback.
-- **Chunks viewer** — browse the raw stored rows across all three chunk indexes (parent chunks, sentences, child chunks) that back the different retrieval strategies.
+- **Chunks viewer** — browse the raw stored rows across all four chunk indexes (parent chunks, sentences, child chunks, RAPTOR summaries) that back the different retrieval strategies.
 - **Optional LangFuse tracing** — when configured, every chat request is traced (latency, token counts, prompt/completion per chain node, tagged with the active RAG mode) so strategies can be compared side by side.
 - **Streaming chat** over SSE, with an always-visible embedded PDF viewer (plain `<iframe>`, no client-side PDF renderer).
 
@@ -32,8 +32,10 @@ This repo exists to build a working, comparable implementation of the major RAG 
 Automated scoring is wired in via [**raglens**](https://github.com/AbhisekMishra/raglens) — a small TypeScript package (also built by the author of this repo) that reimplements RAGAS-style RAG metrics without requiring Python. It scores a `{question, answer, contexts}` sample against a pluggable `Judge` (an Ollama adapter ships built-in) and currently provides:
 - **faithfulness** — decomposes the answer into factual statements and verifies each against the retrieved contexts
 - **answer_relevancy** — LLM-judged relevance of the answer to the question
+- **context_precision** — were the relevant retrieved chunks ranked ahead of the irrelevant ones (average precision)
+- **context_recall** — did the retrieved context cover every statement in the golden ground-truth answer
 
-Run `npm run eval` (optionally `-- --userId=<id>`, default `eval-user`) to run every registered RAG mode against a small fixed golden question set (`src/app/lib/eval/goldenSet.ts`, currently 10 questions about "Attention Is All You Need") and print a per-mode faithfulness/answer_relevancy comparison table — **you need that PDF already uploaded under the same `userId` first**. If `LANGFUSE_PUBLIC_KEY`/`LANGFUSE_SECRET_KEY` are set, each question's scores are also pushed back to its own trace in LangFuse. Set `OLLAMA_JUDGE_MODEL` to use a separate (ideally larger) model as the judge instead of the same model that answered the questions — otherwise it self-judges. See `CLAUDE.md`'s "Evaluation (Phase 2)" section for how the harness works and its known limitations.
+Run `npm run eval` (optionally `-- --userId=<id>`, default `eval-user`) to run every registered RAG mode against a small fixed golden question set (`src/app/lib/eval/goldenSet.ts`, currently 10 questions about "Attention Is All You Need") and print a per-mode faithfulness/answer_relevancy/context_precision/context_recall comparison table — **you need that PDF already uploaded under the same `userId` first**. If `LANGFUSE_PUBLIC_KEY`/`LANGFUSE_SECRET_KEY` are set, each question's scores are also pushed back to its own trace in LangFuse. Set `OLLAMA_JUDGE_MODEL` to use a separate (ideally larger) model as the judge instead of the same model that answered the questions — otherwise it self-judges. See `CLAUDE.md`'s "Evaluation (Phase 2)" section for how the harness works and its known limitations.
 
 ## Prerequisites
 
@@ -67,7 +69,7 @@ OLLAMA_EMBEDDINGS_MODEL=nomic-embed-text
 ```
    - Optionally, add `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `LANGFUSE_BASEURL` to enable request tracing. The app runs fine without them.
 
-4. Run the Supabase setup script mentioned in **[`supabaseScripts.txt`](https://github.com/AbhisekMishra/rag-ollama-js/blob/main/supabaseScripts.txt)** against your project. This creates the core `documents`/`match_documents` table+RPC, the `users` table and password RPCs, plus the extra tables/RPCs required by hybrid search, sentence-window, parent-document retrieval, and Graph RAG specifically (see the file's step markers). A `document_store` storage bucket is also expected.
+4. Run the Supabase setup script mentioned in **[`supabaseScripts.txt`](https://github.com/AbhisekMishra/rag-ollama-js/blob/main/supabaseScripts.txt)** against your project. This creates the core `documents`/`match_documents` table+RPC, the `users` table and password RPCs, plus the extra tables/RPCs required by hybrid search, sentence-window, parent-document retrieval, Graph RAG, and RAPTOR specifically (see the file's step markers). A `document_store` storage bucket is also expected.
 
 5. Start the development server:
 ```bash
@@ -117,6 +119,7 @@ src/
 │   │   ├── sentence-window.ts
 │   │   ├── parent-document.ts
 │   │   ├── graph-rag.ts
+│   │   ├── raptor.ts
 │   │   ├── eval/              # Golden set + raglens eval harness (npm run eval)
 │   │   └── prompts.ts        # All prompt templates
 │   └── utils/                # Helper functions and centralized env config

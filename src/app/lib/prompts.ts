@@ -116,7 +116,43 @@ export const routeComplexityTemplate = PromptTemplate.fromTemplate(
     classification:`
 );
 
-export const answerTemplate = PromptTemplate.fromTemplate(`You are a helpful and enthusiastic support bot who answers questions based on the provided context.
+export const speculativeDraftTemplate = PromptTemplate.fromTemplate(
+    `Using ONLY the passages below, write a short draft answer (2-3 sentences) to the question. If the passages don't contain the answer, say so briefly.
+    passages: {passages}
+    question: {question}
+    draft answer:`
+);
+
+export const speculativeVerifyTemplate = PromptTemplate.fromTemplate(
+    `On a scale from 0.0 to 1.0, how good is the following draft answer? A good draft directly answers the question AND only states things the passages it was written from actually support.
+    Reply with ONLY a number between 0 and 1, nothing else.
+    question: {question}
+    passages: {passages}
+    draft answer: {draft}
+    draft quality score:`
+);
+
+export const flareDraftTemplate = PromptTemplate.fromTemplate(
+    `Write a short tentative answer (2-4 short sentences) to the question from your own general knowledge, without looking anything up. One claim per sentence, no bullets or numbering. It's fine to be wrong — this draft is only used to decide what to look up.
+    conversation history: {history}
+    question: {question}
+    tentative answer:`
+);
+
+export const flareConfidenceTemplate = PromptTemplate.fromTemplate(
+    `On a scale from 0.0 to 1.0, how confident are you that the following statement is factually correct, without checking any source? Use a low number for specific figures, names, or claims you're guessing at.
+    Reply with ONLY a number between 0 and 1, nothing else.
+    statement: {statement}
+    confidence:`
+);
+
+export const raptorSummaryTemplate = PromptTemplate.fromTemplate(
+    `Write a concise summary (3-5 sentences) of the following related passages from one document. Keep concrete names, figures, and key claims; do not add anything that isn't in the passages. Reply with ONLY the summary.
+    passages: {passages}
+    summary:`
+);
+
+export const answerTemplate =PromptTemplate.fromTemplate(`You are a helpful and enthusiastic support bot who answers questions based on the provided context.
 The context is a list of numbered excerpts, each labeled "[Source N | Page P]" followed by its text.
 Your goal is to find the most relevant information from the context to answer the question.
 

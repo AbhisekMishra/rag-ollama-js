@@ -41,6 +41,9 @@ function shapeStageData(name: string, output: unknown): unknown {
         case "graphSearch":
         case "expandWindow":
         case "expandToParent":
+        case "fuseRankings":
+        case "raptorSummaryRetrieve":
+        case "mergeTreeLevels":
         case "autoMergeChunks":
             return summarizeDocs(output as DocLike[]);
         case "vectorRetrieveMany":
@@ -54,12 +57,18 @@ function shapeStageData(name: string, output: unknown): unknown {
         case "standaloneQuestion":
         case "generatePhrasings":
         case "hydeDraft":
+        case "flareDraft":
         case "critiqueGroundedness":
         case "routeQuery":
         case "decomposeQuestions":
         case "buildHopContext":
         case "routeComplexity":
             return output;
+        case "speculativeDrafts":
+        case "flareLookahead":
+            // Output is {docs, rows} — the visualizer renders `rows` (per-draft / per-sentence
+            // breakdown with expandable raw LLM I/O); the kept docs surface via `sources`.
+            return { rows: (output as { rows: unknown }).rows };
         case "judgeSufficiency":
         case "cragGrade":
             // Both named steps' output is {docs|kept, attempts} (see selfRagRetrieve/cragRetrieve
@@ -122,6 +131,7 @@ const LLM_STAGE_RUNNAMES: Record<string, string> = {
     standaloneQuestionLLM: "standaloneQuestion",
     generatePhrasingsLLM: "generatePhrasings",
     hydeDraftLLM: "hydeDraft",
+    flareDraftLLM: "flareDraft",
     routeQueryLLM: "routeQuery",
     decomposeQuestionsLLM: "decomposeQuestions",
     routeComplexityLLM: "routeComplexity",

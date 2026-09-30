@@ -16,6 +16,10 @@ import { agenticChain } from "./agentic";
 import { multiHopChain } from "./multi-hop";
 import { graphChain } from "./graph";
 import { adaptiveChain } from "./adaptive";
+import { ragFusionChain } from "./rag-fusion";
+import { speculativeChain } from "./speculative";
+import { flareChain } from "./flare";
+import { raptorChain } from "./raptor";
 import type { RagStrategy } from "./types";
 import { DEFAULT_RAG_MODE, type RagMode } from "./modes";
 
@@ -39,6 +43,10 @@ export const RAG_STRATEGIES: Record<RagMode, RagStrategy> = {
     "multi-hop": multiHopChain,
     graph: graphChain,
     adaptive: adaptiveChain,
+    "rag-fusion": ragFusionChain,
+    speculative: speculativeChain,
+    flare: flareChain,
+    raptor: raptorChain,
 };
 
 export function buildRagChain(mode: RagMode, filter: Record<string, unknown>): RunnableSequence {

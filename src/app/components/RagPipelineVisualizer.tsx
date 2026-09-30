@@ -71,6 +71,19 @@ function isCompressionTable(data: unknown): data is CompressionTable {
     return typeof data === "object" && data !== null && "table" in data;
 }
 
+// Generic per-item breakdown (speculative drafts, FLARE sentence checks): a `rows` array of
+// {title, badge, highlight, details[]} — mirrors StageRow in rag-strategies/retrieval.ts.
+interface StageRowData {
+    title: string;
+    badge: string;
+    highlight: boolean;
+    details: { label: string; text: string }[];
+}
+
+function isRowTable(data: unknown): data is { rows: StageRowData[] } {
+    return typeof data === "object" && data !== null && "rows" in data && Array.isArray((data as { rows: unknown }).rows);
+}
+
 function isCandidateCount(data: unknown): data is CandidateCount {
     return typeof data === "object" && data !== null && "count" in data;
 }
@@ -162,7 +175,7 @@ function OutputLabel({ kind }: { kind: PipelineStageKind }) {
 function StageOutput({ id, kind, output }: { id: string; kind: PipelineStageKind; output: unknown }) {
     if (output === undefined || output === null) return null;
 
-    if ((id === "standaloneQuestion" || id === "hydeDraft") && typeof output === "string") {
+    if ((id === "standaloneQuestion" || id === "hydeDraft" || id === "flareDraft") && typeof output === "string") {
         return (
             <div className="mt-1.5">
                 <OutputLabel kind={kind} />
@@ -250,6 +263,37 @@ function StageOutput({ id, kind, output }: { id: string; kind: PipelineStageKind
                                     <p className="text-[10px] font-semibold uppercase tracking-wide">LLM response</p>
                                     <pre className="mt-0.5 max-h-32 overflow-y-auto whitespace-pre-wrap rounded border border-border bg-paper px-2 py-1 font-mono text-[10px] text-ink-soft">{row.completion}</pre>
                                 </div>
+                            </div>
+                        </details>
+                    ))}
+                </div>
+            </div>
+        );
+    }
+
+    if (isRowTable(output)) {
+        return (
+            <div className="mt-1.5">
+                <OutputLabel kind={kind} />
+                <div className="mt-0.5 max-h-64 space-y-1 overflow-y-auto pr-1">
+                    {output.rows.map((row, index) => (
+                        <details
+                            key={index}
+                            className={`rounded-lg border text-[11px] ${
+                                row.highlight ? "border-accent bg-accent-soft text-accent" : "border-border bg-surface text-ink-faint"
+                            }`}
+                        >
+                            <summary className="flex cursor-pointer select-none items-center justify-between gap-2 px-2 py-1">
+                                <span className="truncate">{row.title}</span>
+                                <span className="shrink-0 font-mono">{row.badge}</span>
+                            </summary>
+                            <div className="space-y-1.5 border-t border-border px-2 py-1.5">
+                                {row.details.map((detail, i) => (
+                                    <div key={i}>
+                                        <p className="text-[10px] font-semibold uppercase tracking-wide">{detail.label}</p>
+                                        <pre className="mt-0.5 max-h-32 overflow-y-auto whitespace-pre-wrap rounded border border-border bg-paper px-2 py-1 font-mono text-[10px] text-ink-soft">{detail.text}</pre>
+                                    </div>
+                                ))}
                             </div>
                         </details>
                     ))}

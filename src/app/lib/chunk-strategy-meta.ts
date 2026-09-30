@@ -36,4 +36,13 @@ export const CHUNK_STRATEGY_META: Record<ChunkIndex, ChunkStrategyMeta> = {
             { label: "Child chunk overlap", value: "20 characters" },
         ],
     },
+    raptor_documents: {
+        label: "RAPTOR Summary Tree",
+        description: "The naive chunks are clustered by embedding similarity and each cluster is summarized by the LLM; those summaries are clustered and summarized again, recursively, until one root remains. Only the summary nodes are stored here (the leaves are the naive index above). A broad question can then match a high-level summary while a narrow one matches a leaf. A summary's page is its earliest member page. Used by the \"RAPTOR\" RAG mode.",
+        config: [
+            { label: "Cluster size", value: "~5 nodes per summary" },
+            { label: "Max levels", value: "3 summary levels" },
+            { label: "Clustering", value: "cosine k-means (deterministic)" },
+        ],
+    },
 };

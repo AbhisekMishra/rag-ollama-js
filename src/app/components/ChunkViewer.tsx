@@ -12,6 +12,7 @@ const INDEX_LABELS: Record<ChunkIndex, string> = {
     documents: "Naive",
     sentence_documents: "Sentence-Window",
     child_documents: "Parent-Document",
+    raptor_documents: "RAPTOR",
 };
 
 function pageOf(metadata: Record<string, unknown>): string {

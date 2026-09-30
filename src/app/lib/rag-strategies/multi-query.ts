@@ -26,7 +26,8 @@ function parsePhrasings(raw: string): string[] {
         .slice(0, 5);
 }
 
-const rephraseChain = RunnableSequence.from([
+// Exported so rag-fusion.ts can reuse the exact same phrasing generation step.
+export const rephraseChain = RunnableSequence.from([
     multiQueryTemplate,
     rephraseLLM,
     new StringOutputParser(),

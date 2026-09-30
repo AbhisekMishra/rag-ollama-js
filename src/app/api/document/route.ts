@@ -2,7 +2,8 @@ import { supabaseClient } from '@/app/lib/supabase';
 import { PDFLoader } from "@langchain/community/document_loaders/fs/pdf";
 import { RecursiveCharacterTextSplitter } from "@langchain/textsplitters";
 
-import { vectorStore, sentenceVectorStore, childVectorStore } from '@/app/lib/supabase';
+import { vectorStore, sentenceVectorStore, childVectorStore, raptorVectorStore } from '@/app/lib/supabase';
+import { buildRaptorTree } from '@/app/lib/raptor';
 import { buildSentenceWindowDocuments } from '@/app/lib/sentence-window';
 import { buildChildDocuments } from '@/app/lib/parent-document';
 import { extractGraphData, insertGraphData } from '@/app/lib/graph-rag';
@@ -82,6 +83,9 @@ export async function POST(req: Request) {
     const { error: deleteGraphError } = await supabaseClient.rpc('delete_graph_data_by_user', { userid: userId });
     if (deleteGraphError) throw new Response('Error in deleting graph data!', { status: 400 });
 
+    const { error: deleteRaptorError } = await supabaseClient.rpc('delete_raptor_documents_by_user', { userid: userId });
+    if (deleteRaptorError) throw new Response('Error in deleting RAPTOR summaries!', { status: 400 });
+
     const insertedDocumentIds = await vectorStore().addDocuments(docOutput);
     await sentenceVectorStore().addDocuments(sentenceDocOutput);
     await childVectorStore().addDocuments(childDocOutput);
@@ -94,6 +98,15 @@ export async function POST(req: Request) {
     const chunksForGraph = docOutput.map((doc, i) => ({ id: Number(insertedDocumentIds[i]), text: doc.pageContent }));
     const graphPlan = await extractGraphData(chunksForGraph);
     await insertGraphData(graphPlan, userId);
+
+    // RAPTOR summary tree (see lib/raptor.ts and supabaseScripts.txt STEP 13) — clusters the
+    // parent chunks by embedding, LLM-summarizes each cluster, and recurses. Only the summary
+    // nodes are stored; the leaves are the `documents` rows written above. The heaviest ingestion
+    // cost of any mode (one extra embedding pass plus ~N/5 + N/25 + ... summarization LLM calls).
+    const raptorTree = await buildRaptorTree(docOutput);
+    if (raptorTree.docs.length > 0) {
+        await raptorVectorStore().addVectors(raptorTree.vectors, raptorTree.docs);
+    }
 
     return new Response('', { status: 201 });
 }

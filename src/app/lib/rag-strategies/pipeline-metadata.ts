@@ -295,4 +295,73 @@ export const RAG_PIPELINE_STAGES: Record<RagMode, PipelineStageMeta[]> = {
         },
         answerLLM,
     ],
+    "rag-fusion": [
+        {
+            id: "generatePhrasings",
+            label: "Generate Phrasings",
+            what: "Asks the LLM for 4 alternative phrasings of your question, each using different vocabulary or angle.",
+            why: "Same as multi-query: one phrasing can miss the right chunk because its wording doesn't match the document's, so several phrasings hedge against that.",
+            kind: "transform",
+        },
+        {
+            id: "vectorRetrieveMany",
+            label: "Retrieve Per Phrasing",
+            what: "Runs vector retrieval for the original question and all 4 phrasings in parallel, keeping each phrasing's own ranked list of 6.",
+            why: "Fusion needs each phrasing's ranking intact — so unlike multi-query, the lists aren't flattened together yet.",
+            kind: "retrieve",
+        },
+        {
+            id: "fuseRankings",
+            label: "Reciprocal Rank Fusion",
+            what: "Scores every chunk by the sum of 1/(60 + rank) across every phrasing's list it appears in, then keeps the top 4.",
+            why: "A chunk that ranks well for SEVERAL phrasings is stronger evidence than one that topped a single list. Plain dedupe (multi-query) throws that rank information away; RRF uses it — the same fusion math hybrid search uses, applied across query variants instead of across search types.",
+            kind: "score",
+        },
+        answerLLM,
+    ],
+    speculative: [
+        {
+            id: "speculativeDrafts",
+            label: "Draft + Verify Per Subset",
+            what: "Retrieves a pool of 12 chunks, splits it into 3 subsets (round-robin by rank), has the LLM write a short draft answer from each subset, and has a verifier score every draft (0–1). The best draft's subset wins.",
+            why: "Instead of trusting one retrieval blob, several different slices of the evidence each get a chance to produce an answer, and a verifier picks the slice that yields the best-supported one. Only the winning subset is passed to the final answer step — the drafts themselves are used to choose evidence, not shown as the answer (this app streams exactly one answer per response).",
+            kind: "score",
+        },
+        answerLLM,
+    ],
+    flare: [
+        {
+            id: "flareDraft",
+            label: "Tentative Draft",
+            what: "The LLM writes a short tentative answer from its own general knowledge, without looking anything up.",
+            why: "The draft says what the model is ABOUT to claim — which is exactly what needs checking. It's never shown as the answer.",
+            kind: "transform",
+        },
+        {
+            id: "flareLookahead",
+            label: "Confidence Check + Active Retrieval",
+            what: "Splits the draft into sentences and asks the LLM how confident it is in each (0–1). Sentences below 0.7 trigger a retrieval that uses the sentence itself as the query; the question is always retrieved for too.",
+            why: "Forward-looking active retrieval: retrieve only where the model is unsure, using what it was about to say as the query. Real FLARE watches token probabilities while streaming the final answer; this app's single-answer-stream protocol can't, so verbalized confidence over a tentative draft stands in for it.",
+            kind: "score",
+        },
+        answerLLM,
+    ],
+    raptor: [
+        vectorRetrieve,
+        {
+            id: "raptorSummaryRetrieve",
+            label: "Summary-Tree Retrieval",
+            what: "Alongside the leaf chunks, embeds the query and finds the most similar section summaries — LLM-written summaries of clusters of chunks, built at upload time and recursively summarized again into higher levels.",
+            why: "A broad question (\"what is this paper about?\") often can't be answered by any single verbatim chunk, but a summary of a whole section can. The tree lets one search reach both high-level overviews and fine detail.",
+            kind: "retrieve",
+        },
+        {
+            id: "mergeTreeLevels",
+            label: "Merge Tree Levels",
+            what: "Interleaves the ranked summaries and leaf chunks into one context, labeling each summary with the page span it covers.",
+            why: "The paper ranks every tree node together; the retriever here doesn't expose similarity scores, so alternating the two ranked lists guarantees both kinds of evidence are represented.",
+            kind: "score",
+        },
+        answerLLM,
+    ],
 };

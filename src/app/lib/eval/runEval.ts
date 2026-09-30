@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import { CallbackHandler } from "@langfuse/langchain";
-import { evaluate, faithfulness, answerRelevancy, type Judge, type Sample, type EvaluationSummary } from "raglens";
+import { evaluate, faithfulness, answerRelevancy, contextPrecision, contextRecall, type Judge, type Sample, type EvaluationSummary } from "raglens";
 
 import { buildRagChain, type RagMode } from "../rag-strategies";
 import { env } from "../../utils/env";
@@ -102,6 +102,17 @@ async function pushScoreToLangfuse(traceId: string | null, name: string, value: 
     }
 }
 
+// context_precision needs one entry per retrieved chunk in rank order. The chain's context is a
+// single string of "[Source N | Page P]"-headed chunks (buildContext/buildMultiHopContext), so
+// split on those headers. faithfulness/context_recall join the contexts anyway, so the split is
+// equivalent for them. Modes with no retrieval (a DIRECT route) yield an empty context -> [].
+function splitContext(context: string): string[] {
+    return context
+        .split(/(?=\[Source \d+ \| Page \d+\])/)
+        .map((chunk) => chunk.trim())
+        .filter(Boolean);
+}
+
 // Runs the full golden set through one RAG mode, scores each sample with raglens, and pushes
 // both metrics back to LangFuse against that question's own trace (so a mode's scores can be
 // inspected per-trace in the LangFuse UI, not just as an aggregate).
@@ -111,11 +122,11 @@ export async function runEvalForMode(mode: RagMode, filter: Record<string, unkno
 
     for (const golden of GOLDEN_SET) {
         const { answer, context, traceId } = await runChainForEval(mode, filter, golden.question, [runTag]);
-        samples.push({ question: golden.question, answer, contexts: [context], groundTruth: golden.groundTruth });
+        samples.push({ question: golden.question, answer, contexts: splitContext(context), groundTruth: golden.groundTruth });
         traceIds.push(traceId);
     }
 
-    const summary = await evaluate(samples, { metrics: [faithfulness, answerRelevancy], judge });
+    const summary = await evaluate(samples, { metrics: [faithfulness, answerRelevancy, contextPrecision, contextRecall], judge });
 
     await Promise.all(summary.results.flatMap((result, i) =>
         Object.entries(result.scores).map(([metricName, { score, reason }]) =>

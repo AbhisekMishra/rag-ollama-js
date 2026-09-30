@@ -60,17 +60,27 @@ async function main() {
     console.log(`Judge model: ${judgeModel}${judgeModel === env.ollama.llm.model ? " (same model the chains answer with — self-judging bias; set OLLAMA_JUDGE_MODEL to use a separate one)" : " (separate from the answering model)"}.`);
     const judge = createOllamaJudge({ baseUrl: env.ollama.llm.baseUrl, model: judgeModel });
 
-    const rows: { mode: string; faithfulness: string; answerRelevancy: string }[] = [];
+    const rows: { mode: string; faithfulness: string; answerRelevancy: string; contextPrecision: string; contextRecall: string }[] = [];
 
     try {
+        const only = parseModes();
         for (const { value: mode } of RAG_MODES) {
+            if (only && !only.includes(mode)) continue;
             console.log(`\n=== ${mode} ===`);
-            const summary = await runEvalForMode(mode, { userId }, judge, runTag);
-            rows.push({
-                mode,
-                faithfulness: summary.averages.faithfulness.toFixed(2),
-                answerRelevancy: summary.averages.answer_relevancy.toFixed(2),
-            });
+            // One mode exhausting its retries shouldn't discard every other mode's results.
+            try {
+                const summary = await runEvalForMode(mode, { userId }, judge, runTag);
+                rows.push({
+                    mode,
+                    faithfulness: summary.averages.faithfulness.toFixed(2),
+                    answerRelevancy: summary.averages.answer_relevancy.toFixed(2),
+                    contextPrecision: summary.averages.context_precision.toFixed(2),
+                    contextRecall: summary.averages.context_recall.toFixed(2),
+                });
+            } catch (error) {
+                console.error(`[${mode}] failed after retries, continuing:`, error instanceof Error ? error.message : error);
+                rows.push({ mode, faithfulness: "FAILED", answerRelevancy: "FAILED", contextPrecision: "FAILED", contextRecall: "FAILED" });
+            }
         }
     } finally {
         // Flush any spans the batched processor hasn't exported yet — a short-lived script can

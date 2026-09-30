@@ -346,3 +346,59 @@ BEGIN
     DELETE FROM graph_entities WHERE user_id = userid;
 END;
 $$ LANGUAGE plpgsql;
+
+
+-- ============================================================
+-- STEP 13: RAPTOR (recursive summary tree)
+-- Stores only the SUMMARY nodes of the RAPTOR tree (levels >= 1) — the leaves are the existing
+-- `documents` rows, and the "raptor" RAG mode unions a leaf search there with a summary search
+-- here. Same shape and reasoning as STEP 10/11: a separate table (not a metadata flag on
+-- `documents`) because every other mode's retriever filters only by {userId}, and jsonb
+-- containment (`@>`) is a superset match, so summary rows sharing that {userId} would otherwise
+-- leak into every other mode's retrieval. Used by the "raptor" RAG mode — without this step,
+-- that mode errors at query time. Safe to run on an existing project.
+-- NOTE: vector(768) must stay in sync with match_documents above.
+-- ============================================================
+CREATE TABLE raptor_documents (
+  id bigserial PRIMARY KEY,
+  content text,          -- the LLM-written summary (what gets embedded)
+  metadata jsonb,         -- {documentName, userId, level, pageNumber (earliest member page), pageMax, childCount}
+  embedding vector(768)
+);
+
+CREATE FUNCTION match_raptor_documents (
+  query_embedding vector(768),
+  match_count int DEFAULT null,
+  filter jsonb DEFAULT '{}'
+) RETURNS TABLE (
+  id bigint,
+  content text,
+  metadata jsonb,
+  embedding jsonb,
+  similarity float
+)
+LANGUAGE plpgsql
+AS $$
+#variable_conflict use_column
+BEGIN
+  RETURN QUERY
+  SELECT
+    id,
+    content,
+    metadata,
+    (embedding::text)::jsonb AS embedding,
+    1 - (raptor_documents.embedding <=> query_embedding) AS similarity
+  FROM raptor_documents
+  WHERE metadata @> filter
+  ORDER BY raptor_documents.embedding <=> query_embedding
+  LIMIT match_count;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION delete_raptor_documents_by_user(userid TEXT)
+RETURNS VOID AS $$
+BEGIN
+    DELETE FROM raptor_documents
+    WHERE metadata @> FORMAT('{"userId": "%s"}', userid)::JSONB;
+END;
+$$ LANGUAGE plpgsql;

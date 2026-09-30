@@ -2,11 +2,11 @@ import { RunnableSequence, RunnableLambda, RunnablePassthrough } from "@langchai
 import { StringOutputParser } from "@langchain/core/output_parsers";
 import type { DocumentInterface } from "@langchain/core/documents";
 
-import { retriever, hybridSearcher, sentenceRetriever, childRetriever } from "../supabase";
+import { retriever, hybridSearcher, sentenceRetriever, childRetriever, raptorRetriever } from "../supabase";
 import { graphSearcher } from "../graph-rag";
 import { buildContext } from "../../utils/helpers";
 import { llm } from "../ollama";
-import { rerankTemplate, compressionTemplate, contextSufficiencyTemplate, selfRagRewriteTemplate, cragRewriteTemplate } from "../prompts";
+import { rerankTemplate, compressionTemplate, contextSufficiencyTemplate, selfRagRewriteTemplate, cragRewriteTemplate, speculativeDraftTemplate, speculativeVerifyTemplate, flareConfidenceTemplate } from "../prompts";
 
 // Retrieval piped into citation-context building — composed, not hand-orchestrated with
 // async/await — as one named runnable step shared by every strategy, so the chat route can
@@ -450,5 +450,204 @@ export const retrieveMultiHopAndBuildContext = (filter: Record<string, unknown>)
 // path needs the raw query text (not just its embedding) to re-run plain vector retrieval.
 export const graphRetrieveAndBuildContext = (filter: Record<string, unknown>) => RunnableSequence.from([
     RunnableLambda.from(graphSearcher(filter)).withConfig({ runName: "graphSearch" }),
+    RunnableLambda.from(buildContext),
+]).withConfig({ runName: "retrieveAndBuildContext" });
+
+// Row shape shared by the pipeline visualizer's generic "row table" renderer (see
+// RagPipelineVisualizer.tsx's isRowTable) — used by stages that need to show a per-item
+// breakdown (each draft, each sentence check) with expandable raw LLM prompt/response, without
+// each one needing its own bespoke component.
+export interface StageRow {
+    title: string;
+    badge: string;
+    highlight: boolean;
+    details: { label: string; text: string }[];
+}
+
+const RRF_K = 60;
+const RAG_FUSION_FETCH_COUNT = 6;
+const RAG_FUSION_KEEP_COUNT = 4;
+
+// Reciprocal rank fusion across the per-phrasing ranked lists: each chunk scores
+// sum(1 / (RRF_K + rank)) over every list it appears in, so a chunk that ranks well for
+// SEVERAL phrasings beats one that ranks first for just one. Same fusion math hybrid search
+// runs in-database (STEP 9) — applied here across query variants instead of across search types.
+// Multi-query's plain dedupe throws the rank information away; this keeps it.
+function fuseRankings(docGroups: DocumentInterface[][]): DocumentInterface[] {
+    const fused = new Map<string, { doc: DocumentInterface; score: number }>();
+    for (const group of docGroups) {
+        group.forEach((doc, rank) => {
+            const entry = fused.get(doc.pageContent) ?? { doc, score: 0 };
+            entry.score += 1 / (RRF_K + rank + 1);
+            fused.set(doc.pageContent, entry);
+        });
+    }
+    return [...fused.values()]
+        .sort((a, b) => b.score - a.score)
+        .slice(0, RAG_FUSION_KEEP_COUNT)
+        .map(({ doc }) => doc);
+}
+
+// RAG-Fusion variant of retrieveManyAndBuildContext: same fan-out over [question, ...phrasings]
+// (same "vectorRetrieveMany" runName, so the visualizer's shared stage copy applies), but fused
+// by reciprocal rank rather than deduped-and-concatenated, and trimmed back to 4 chunks so the
+// isolated variable against multi-query is the fusion step, not a bigger context.
+export const ragFusionRetrieveAndBuildContext = (filter: Record<string, unknown>) => RunnableSequence.from([
+    RunnableLambda.from((queries: string[]) => retriever(filter, RAG_FUSION_FETCH_COUNT).batch(queries)).withConfig({ runName: "vectorRetrieveMany" }),
+    RunnableLambda.from(fuseRankings).withConfig({ runName: "fuseRankings" }),
+    RunnableLambda.from(buildContext),
+]).withConfig({ runName: "retrieveAndBuildContext" });
+
+const SPECULATIVE_FETCH_COUNT = 12;
+const SPECULATIVE_SUBSET_COUNT = 3;
+
+const speculativeDraftChain = RunnableSequence.from([speculativeDraftTemplate, llm, new StringOutputParser()]);
+const speculativeVerifyChain = RunnableSequence.from([speculativeVerifyTemplate, llm, new StringOutputParser()]);
+
+// Speculative RAG: retrieve one wider pool, split it into subsets (round-robin by rank so every
+// subset gets a spread of strong and weak hits, rather than one subset hoarding the best),
+// draft an answer from each subset in parallel, and have a verifier score each draft. The
+// highest-scoring draft's subset becomes the context for the single streamed answerLLM call.
+// Canonical Speculative RAG returns the winning *draft* as the answer; this app's SSE protocol
+// assumes exactly one clean answerLLM token stream per response (same constraint that shapes
+// self-rag.ts), so the drafts are used to SELECT the best evidence subset and the final answer
+// is regenerated from it — a documented simplification. Bare .invoke() calls, so prompt/completion
+// are captured as row data rather than via streamEvents (same as scoreRelevance/compressChunk).
+async function speculativeSelect(filter: Record<string, unknown>, question: string): Promise<{ docs: DocumentInterface[]; rows: StageRow[] }> {
+    const pool = await retriever(filter, SPECULATIVE_FETCH_COUNT).invoke(question);
+    const subsets: DocumentInterface[][] = Array.from({ length: SPECULATIVE_SUBSET_COUNT }, () => []);
+    pool.forEach((doc, i) => subsets[i % SPECULATIVE_SUBSET_COUNT].push(doc));
+    const populated = subsets.filter((subset) => subset.length > 0);
+
+    const drafts = await Promise.all(populated.map(async (subset) => {
+        const passages = subset.map((doc) => doc.pageContent).join("\n\n");
+        const draftPrompt = await speculativeDraftTemplate.format({ passages, question });
+        const draft = (await speculativeDraftChain.invoke({ passages, question })).trim();
+        const verdict = await speculativeVerifyChain.invoke({ question, passages, draft });
+        return { subset, draft, draftPrompt, verdict, score: clamp01(parseFloat(verdict)) };
+    }));
+
+    // Ties resolve to the earliest subset, which holds the highest-ranked hit.
+    let best = 0;
+    drafts.forEach((d, i) => { if (d.score > drafts[best].score) best = i; });
+
+    const rows: StageRow[] = drafts.map((d, i) => ({
+        title: `Subset ${i + 1} — pages ${[...new Set(d.subset.map((doc) => doc.metadata?.pageNumber ?? 0))].join(", ")}`,
+        badge: d.score.toFixed(2),
+        highlight: i === best,
+        details: [
+            { label: "Draft answer", text: d.draft },
+            { label: "Draft prompt", text: d.draftPrompt },
+            { label: "Verifier reply", text: d.verdict },
+        ],
+    }));
+    return { docs: drafts.length ? drafts[best].subset : [], rows };
+}
+
+export const speculativeRetrieveAndBuildContext = (filter: Record<string, unknown>) => RunnableSequence.from([
+    RunnableLambda.from((question: string) => speculativeSelect(filter, question)).withConfig({ runName: "speculativeDrafts" }),
+    RunnableLambda.from(({ docs }: { docs: DocumentInterface[]; rows: StageRow[] }) => buildContext(docs)),
+]).withConfig({ runName: "retrieveAndBuildContext" });
+
+const FLARE_MAX_SENTENCES = 4;
+const FLARE_CONFIDENCE_THRESHOLD = 0.7;
+const FLARE_SENTENCE_FETCH_COUNT = 2;
+
+const flareConfidenceChain = RunnableSequence.from([flareConfidenceTemplate, llm, new StringOutputParser()]);
+
+// Same tolerance as multi-query's phrasing parser: small models sometimes emit bullets/numbers
+// or a literal "\n" escape instead of a newline, so split on sentence punctuation as well.
+function splitDraftSentences(draft: string): string[] {
+    return draft
+        .split(/(?<=[.!?])\s+|\r?\n|\\n/)
+        .map((s) => s.replace(/^[-*\d.)\s]+/, "").trim())
+        .filter((s) => s.length >= 15)
+        .slice(0, FLARE_MAX_SENTENCES);
+}
+
+// FLARE (Forward-Looking Active Retrieval): the LLM drafts a tentative answer first; each
+// upcoming sentence it would say is checked for confidence, and only LOW-confidence sentences
+// trigger a retrieval — using that sentence itself as the query, since it says what the model is
+// about to claim but isn't sure of. Canonical FLARE triggers on token probabilities *while
+// streaming the final answer*; that is incompatible with this app's one-clean-answerLLM-stream
+// SSE protocol (and Ollama logprobs aren't reliable across models), so this is a documented
+// simplification: lookahead happens up-front over a tentative draft, with the model's verbalized
+// confidence standing in for token probability. The question itself is always retrieved for
+// (a grounded answer needs context even if the draft looked confident). Bare .invoke() calls, so
+// prompt/completion ride along as row data (same as the other per-item LLM stages).
+async function flareLookahead(filter: Record<string, unknown>, { question, draft }: { question: string; draft: string }): Promise<{ docs: DocumentInterface[]; rows: StageRow[] }> {
+    const sentences = splitDraftSentences(draft);
+    const checks = await Promise.all(sentences.map(async (statement) => {
+        const prompt = await flareConfidenceTemplate.format({ statement });
+        const completion = await flareConfidenceChain.invoke({ statement });
+        return { statement, prompt, completion, confidence: clamp01(parseFloat(completion)) };
+    }));
+    const uncertain = checks.filter((c) => c.confidence < FLARE_CONFIDENCE_THRESHOLD);
+
+    const [questionDocs, ...sentenceDocGroups] = await Promise.all([
+        retriever(filter).invoke(question),
+        ...uncertain.map((c) => retriever(filter, FLARE_SENTENCE_FETCH_COUNT).invoke(c.statement)),
+    ]);
+    const docs = dedupeDocuments([questionDocs, ...sentenceDocGroups]);
+
+    const rows: StageRow[] = checks.map((c) => ({
+        title: c.statement,
+        badge: c.confidence < FLARE_CONFIDENCE_THRESHOLD ? `${c.confidence.toFixed(2)} -> retrieved` : `${c.confidence.toFixed(2)} confident`,
+        highlight: c.confidence < FLARE_CONFIDENCE_THRESHOLD,
+        details: [
+            { label: "Prompt sent to LLM", text: c.prompt },
+            { label: "LLM response", text: c.completion },
+        ],
+    }));
+    return { docs, rows };
+}
+
+export const flareRetrieveAndBuildContext = (filter: Record<string, unknown>) => RunnableSequence.from([
+    RunnableLambda.from((input: { question: string; draft: string }) => flareLookahead(filter, input)).withConfig({ runName: "flareLookahead" }),
+    RunnableLambda.from(({ docs }: { docs: DocumentInterface[]; rows: StageRow[] }) => buildContext(docs)),
+]).withConfig({ runName: "retrieveAndBuildContext" });
+
+const RAPTOR_LEAF_COUNT = 3;
+const RAPTOR_SUMMARY_COUNT = 2;
+
+// A summary node has no single page — label it with its span so the answer LLM (and the reader
+// clicking the citation, which jumps to metadata.pageNumber = the earliest member page) can tell
+// a high-level section summary from a verbatim leaf chunk.
+function labelSummary(doc: DocumentInterface): DocumentInterface {
+    const { pageNumber, pageMax } = doc.metadata as { pageNumber?: number; pageMax?: number };
+    const span = pageMax && pageMax !== pageNumber ? `pages ${pageNumber}-${pageMax}` : `page ${pageNumber ?? 0}`;
+    return { pageContent: `[Section summary, ${span}] ${doc.pageContent}`, metadata: doc.metadata };
+}
+
+// Collapsed-tree retrieval: paper-style RAPTOR ranks leaves and summaries in ONE pool by
+// similarity. SupabaseVectorStore's retriever doesn't expose scores, so this approximates it by
+// interleaving the two ranked lists (summary, leaf, summary, leaf, leaf) — a broad question tends
+// to put a summary near the top, a narrow one a leaf, and both kinds are always represented.
+function mergeTreeLevels({ leaves, summaries }: { leaves: DocumentInterface[]; summaries: DocumentInterface[] }): DocumentInterface[] {
+    const merged: DocumentInterface[] = [];
+    const seen = new Set<string>();
+    const add = (doc?: DocumentInterface) => {
+        if (!doc || seen.has(doc.pageContent)) return;
+        seen.add(doc.pageContent);
+        merged.push(doc);
+    };
+    const labeled = summaries.map(labelSummary);
+    for (let i = 0; i < Math.max(leaves.length, labeled.length); i++) {
+        add(labeled[i]);
+        add(leaves[i]);
+    }
+    return merged;
+}
+
+// RAPTOR variant: leaf chunks from the `documents` table and summary nodes from raptor_documents
+// (see lib/raptor.ts, supabaseScripts.txt STEP 13) are retrieved side by side in a parallel branch
+// — the leaf step reuses the "vectorRetrieve" runName and stays a bare Document[] (same guardrail
+// as compressRetrieveAndBuildContext) — then merged across tree levels before building citations.
+export const raptorRetrieveAndBuildContext = (filter: Record<string, unknown>) => RunnableSequence.from([
+    {
+        leaves: retriever(filter, RAPTOR_LEAF_COUNT).withConfig({ runName: "vectorRetrieve" }),
+        summaries: raptorRetriever(filter, RAPTOR_SUMMARY_COUNT).withConfig({ runName: "raptorSummaryRetrieve" }),
+    },
+    RunnableLambda.from(mergeTreeLevels).withConfig({ runName: "mergeTreeLevels" }),
     RunnableLambda.from(buildContext),
 ]).withConfig({ runName: "retrieveAndBuildContext" });

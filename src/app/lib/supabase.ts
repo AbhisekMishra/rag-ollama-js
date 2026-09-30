@@ -41,6 +41,17 @@ export const childVectorStore = (filter?: Record<string, unknown>) => new Supaba
 
 export const childRetriever = (filter: Record<string, unknown>, k?: number) => childVectorStore(filter).asRetriever(k);
 
+// Summary nodes of the RAPTOR tree (levels >= 1; the leaves are just the `documents` rows) —
+// see lib/raptor.ts and supabaseScripts.txt STEP 13.
+export const raptorVectorStore = (filter?: Record<string, unknown>) => new SupabaseVectorStore(embeddings, {
+    client: supabaseClient,
+    tableName: "raptor_documents",
+    queryName: "match_raptor_documents",
+    filter: filter || {}
+});
+
+export const raptorRetriever = (filter: Record<string, unknown>, k?: number) => raptorVectorStore(filter).asRetriever(k);
+
 interface HybridSearchRow {
     id: number;
     content: string;
